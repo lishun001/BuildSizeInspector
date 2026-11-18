@@ -1,0 +1,67 @@
+{
+  "reference_id": "unity-6000.0.76f1-android-mono-2026-11-17",
+  "unity_version": "6000.0.76f1",
+  "scope": "controlled_validation_project_not_user_game",
+  "builds": [
+    {
+      "label": "a",
+      "apk_sha256": "4c9dfc8d4401f5b7f3a1fcc146f1bda44e8627ea1abf51b6a99d16f3d686b7da",
+      "apk_bytes": 31168396,
+      "report_sha256": "0ddd494574c7c36033ac8e5f8ad6002209dc6971406d32c25239a7e7ded4aee8",
+      "report_record_count": 4116,
+      "container_count": 42,
+      "exact_mappings": 41,
+      "unmapped": [
+        "globalgamemanagers.assets"
+      ],
+      "texture_guid": "9d75cf8371d9c43c58da37d8f3c85c65",
+      "texture_packed_bytes": 4228,
+      "scene_guids": [
+        "17b0643b67ae84287b7df8f343f1f27f"
+      ],
+      "build_options": [
+        "DetailedBuildReport"
+      ],
+      "importer_coverage": {
+        "state": "failed",
+        "requested_count": 2154,
+        "collected_count": 2151,
+        "failed_count": 3,
+        "ratio": 0.9986072423398329
+      },
+      "exporter_runtime_assemblies": []
+    },
+    {
+      "label": "b",
+      "apk_sha256": "fa552b49e440d268537315b59cb9c6ac225fcaed045c72186054c833a2aab140",
+      "apk_bytes": 31221074,
+      "report_sha256": "471655cb5f5ba5759a048bbc60eb88177a05d2ae398b63a922df6c511742b4c2",
+      "report_record_count": 4116,
+      "container_count": 42,
+      "exact_mappings": 41,
+      "unmapped": [
+        "globalgamemanagers.assets"
+      ],
+      "texture_guid": "9d75cf8371d9c43c58da37d8f3c85c65",
+      "texture_packed_bytes": 65668,
+      "scene_guids": [
+        "17b0643b67ae84287b7df8f343f1f27f"
+      ],
+      "build_options": [
+        "DetailedBuildReport"
+      ],
+      "importer_coverage": {
+        "state": "failed",
+        "requested_count": 2154,
+        "collected_count": 2151,
+        "failed_count": 3,
+        "ratio": 0.9986072423398329
+      },
+      "exporter_runtime_assemblies": []
+    }
+  ],
+  "delta_apk_bytes": 52678,
+  "delta_unity_packed_bytes": 61440,
+  "importer_comparison_status": "partial",
+  "callback_result": "Unknown"
+}

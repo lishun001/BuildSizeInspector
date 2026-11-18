@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "run_id": "76be5fa4-8c26-4a99-b94b-2a559b17b821",
+  "requested_base_build_id": null,
+  "repositories": [
+    {
+      "repo_key": "game",
+      "base_revision": null,
+      "head_revision": "1111111111111111111111111111111111111111",
+      "range_status": "no_baseline",
+      "is_ancestor": null,
+      "changes": [],
+      "commit_ids": []
+    },
+    {
+      "repo_key": "art",
+      "base_revision": null,
+      "head_revision": "2222222222222222222222222222222222222222",
+      "range_status": "no_baseline",
+      "is_ancestor": null,
+      "changes": [],
+      "commit_ids": []
+    }
+  ],
+  "warnings": [
+    "首次构建没有可用基线；未把空差异解释为没有代码变化。"
+  ]
+}

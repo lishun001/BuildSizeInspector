@@ -1,0 +1,8 @@
+{
+  "name": "com.company.buildsize",
+  "version": "0.1.0",
+  "displayName": "BuildSize Inspector Exporter",
+  "description": "仅在 Editor 内导出构建报告、实际设置和入包资源 Importer 快照。",
+  "unity": "6000.0",
+  "dependencies": {}
+}

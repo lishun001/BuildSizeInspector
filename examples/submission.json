@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "76be5fa4-8c26-4a99-b94b-2a559b17b821",
+  "project_key": "demo-game",
+  "variant": "android-release-arm64",
+  "ci": {
+    "instance_id": "jenkins-main",
+    "job_full_name": "games/demo/android-release",
+    "build_number": "1082",
+    "build_url": "https://jenkins.example.invalid/job/demo/1082/"
+  },
+  "artifacts": [
+    {
+      "role": "apk",
+      "filename": "game.apk",
+      "bytes": 104857600,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "build_meta",
+      "filename": "build-meta.json",
+      "bytes": 1834,
+      "sha256": "67c0d5c33d81306bd4bddbf9bf4f679e37c9a538129408afbed4e8929447d354"
+    },
+    {
+      "role": "unity_report",
+      "filename": "unity-report.json",
+      "bytes": 1175,
+      "sha256": "25fd82044ae79097bd790c0bf2891924356290c9d1e4d8f2084a717d9791c03e"
+    },
+    {
+      "role": "asset_importers",
+      "filename": "asset-importers.json",
+      "bytes": 1051,
+      "sha256": "168a5fa1c0bc281f75dfc3afb2d1d80226d8ab22fe2439826497545c5cc69d28"
+    },
+    {
+      "role": "git_changes",
+      "filename": "git-changes.json",
+      "bytes": 728,
+      "sha256": "4dfaba35ed298500103fcfeda1eee6b5da960191318eb7f7a02a04098e413fa7"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "rule_id": "REPORT_DATA_INCOMPLETE",
+  "rule_version": "1",
+  "confidence": "observed",
+  "severity": "info",
+  "subject": {
+    "kind": "container",
+    "key": "container_index:0"
+  },
+  "title": "示例报告包含无源 GUID 的资源记录",
+  "explanation": "该示例记录没有源 GUID 和路径，应保留为生成/内置/未归属资源；不得猜测来源。",
+  "metric": "none",
+  "delta_bytes": null,
+  "additive": false,
+  "evidence": [
+    {
+      "artifact_role": "unity_report",
+      "artifact_sha256": "25fd82044ae79097bd790c0bf2891924356290c9d1e4d8f2084a717d9791c03e",
+      "locator": "/containers/0/entries/1",
+      "summary": "该记录的 source_guid 和 source_path 均为 null。"
+    }
+  ],
+  "suggested_checks": [
+    "查看容器映射及生成资源信息；没有进一步证据时保持未归属。"
+  ],
+  "review_state": "unreviewed"
+}

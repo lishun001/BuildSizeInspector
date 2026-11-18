@@ -1,0 +1,134 @@
+// 接入示例：将两个 existing 脚本映射到原流水线，禁止直接覆盖真实 Jenkinsfile。
+// 所需插件：Pipeline、Credentials Binding；无需 jq 或 Pipeline Utility Steps。
+def analysisReady = false
+
+def advisoryStep(Closure operation) {
+    try {
+        operation()
+        return true
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException interrupted) {
+        throw interrupted
+    } catch (Exception ordinaryFailure) {
+        if (currentBuild.currentResult == 'ABORTED') { throw ordinaryFailure }
+        // 捕获范围仅限新增检测操作，绝不包含原游戏构建/发布。
+        echo 'BuildSize advisory: 检测操作失败，继续原发包流程'
+        return false
+    }
+}
+
+def advisory(String command) {
+    int code = -1
+    if (!advisoryStep { code = sh(returnStatus: true, script: command) }) { return false }
+    if (code == 130 || code == 143) {
+        currentBuild.result = 'ABORTED'
+        error('BuildSize 子进程被中断；保留中止状态')
+    }
+    if (code != 0) { echo "BuildSize advisory: 退出码 ${code}，保留重试材料" }
+    return code == 0
+}
+
+pipeline {
+    agent any
+    options { skipDefaultCheckout(true) }
+    parameters {
+        string(name: 'BUILDSIZE_URL', defaultValue: '', description: '平台 HTTPS 地址，不含凭据')
+        string(name: 'BUILDSIZE_CREDENTIAL_ID', defaultValue: '', description: '项目 CI token 的 Credentials ID')
+        string(name: 'FINAL_APK', defaultValue: 'BuildOutput/game.apk', description: '最终签名/后处理 APK 明确路径')
+    }
+    environment {
+        BUILDSIZE_API_URL = "${params.BUILDSIZE_URL}"
+        FINAL_APK = "${params.FINAL_APK}"
+        BUILDSIZE_CI_DIR = ".buildsize/ci/${env.BUILD_NUMBER}/android-release-arm64"
+    }
+    stages {
+        stage('原有源码检出') {
+            steps { checkout scm } // 多仓检出在 prepare 前完成。
+        }
+        stage('BuildSize prepare（advisory）') {
+            steps {
+                script {
+                    advisoryStep {
+                        analysisReady = advisory('''#!/bin/sh
+set +x
+buildsize prepare --project demo-game --variant android-release-arm64 --config buildsize-ci.json --output "$BUILDSIZE_CI_DIR/context.json"
+''')
+                        if (analysisReady) {
+                            analysisReady = false
+                            def context = new groovy.json.JsonSlurperClassic().parseText(readFile("${env.BUILDSIZE_CI_DIR}/context.json"))
+                            env.BUILDSIZE_RUN_ID = context.run_id
+                            env.BUILDSIZE_REPORT_DIR = context.report_directory
+                            env.BUILDSIZE_EXPORT_MODE = 'callback'
+                            env.BUILDSIZE_IMPORTER_COLLECTION = 'true'
+                            analysisReady = true
+                        }
+                    }
+                }
+            }
+        }
+        stage('原有游戏构建/Gradle/签名/后处理') {
+            steps {
+                sh './ci/existing-game-build.sh' // 使用原入口，保留原有失败与中止行为。
+                script {
+                    advisoryStep {
+                        writeFile file: "${env.BUILDSIZE_CI_DIR}/completed-at.txt", text: java.time.Instant.now().toString()
+                    }
+                }
+            }
+        }
+        stage('BuildSize collect/submit（advisory）') {
+            when { expression { analysisReady } }
+            steps {
+                script {
+                    advisoryStep {
+                        withCredentials([string(credentialsId: params.BUILDSIZE_CREDENTIAL_ID, variable: 'BUILDSIZE_API_TOKEN')]) {
+                            boolean collected = advisory('''#!/bin/sh
+set +x
+buildsize collect --context "$BUILDSIZE_CI_DIR/context.json" --apk "$FINAL_APK" --completed-at-file "$BUILDSIZE_CI_DIR/completed-at.txt" --output "$BUILDSIZE_CI_DIR/submission"
+''')
+                            if (collected) {
+                                advisory('''#!/bin/sh
+set +x
+buildsize submit --directory "$BUILDSIZE_CI_DIR/submission" --receipt "$BUILDSIZE_CI_DIR/receipt.json"
+''')
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage('原有蒲公英发布') {
+            steps { sh './ci/existing-pgyer-publish.sh' } // 不接管 API Key，不忽略原失败。
+            post {
+                always {
+                    script {
+                        if (currentBuild.currentResult != 'ABORTED') {
+                            advisoryStep {
+                                if (fileExists("${env.BUILDSIZE_CI_DIR}/receipt.json") && fileExists("${env.BUILDSIZE_CI_DIR}/pgyer-safe-result.json")) {
+                                    withCredentials([string(credentialsId: params.BUILDSIZE_CREDENTIAL_ID, variable: 'BUILDSIZE_API_TOKEN')]) {
+                                        advisory('''#!/bin/sh
+set +x
+buildsize link-pgyer --receipt "$BUILDSIZE_CI_DIR/receipt.json" --result "$BUILDSIZE_CI_DIR/pgyer-safe-result.json"
+''')
+                                    }
+                                } else {
+                                    echo 'BuildSize advisory: 缺少本次回执或最终发布结果，不关联最近构建'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                if (currentBuild.currentResult != 'ABORTED') {
+                    advisoryStep {
+                        archiveArtifacts artifacts: "${env.BUILDSIZE_CI_DIR}/context.json,${env.BUILDSIZE_CI_DIR}/completed-at.txt,${env.BUILDSIZE_CI_DIR}/receipt.json,${env.BUILDSIZE_CI_DIR}/submission/*.json", allowEmptyArchive: true
+                    }
+                }
+            }
+        }
+    }
+}

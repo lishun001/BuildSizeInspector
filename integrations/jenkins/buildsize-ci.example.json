@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "ci": {"instance_id": "jenkins-main"},
+  "metadata": {
+    "channel": "internal",
+    "warnings": ["示例配置：仓库路径与项目/变体须按实际检出替换。"]
+  },
+  "repositories": [
+    {"repo_key": "game", "path": ".", "kind": "main"},
+    {"repo_key": "art", "path": "../art-workspace", "kind": "art"}
+  ]
+}

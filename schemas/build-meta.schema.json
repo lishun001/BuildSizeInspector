@@ -1,0 +1,338 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$"
+    },
+    "variant": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "const": "Android"
+    },
+    "artifact_type": {
+      "const": "APK"
+    },
+    "application_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_code": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "build_completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ci": {
+      "type": "object",
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "job_full_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_number": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "instance_id",
+        "job_full_name",
+        "build_number",
+        "build_url"
+      ],
+      "additionalProperties": false
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "unity_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "scripting_backend": {
+          "enum": [
+            "IL2CPP",
+            "Mono",
+            null
+          ]
+        },
+        "architectures": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "arm64-v8a",
+                  "armeabi-v7a",
+                  "x86",
+                  "x86_64"
+                ]
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "development_build": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "managed_stripping_level": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strip_engine_code": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "player_compression": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "il2cpp_code_generation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "min_sdk": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "target_sdk_requested": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "build_options": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "export_mode": {
+          "enum": [
+            "direct_apk",
+            "export_gradle"
+          ]
+        }
+      },
+      "required": [
+        "unity_version",
+        "scripting_backend",
+        "architectures",
+        "development_build",
+        "managed_stripping_level",
+        "strip_engine_code",
+        "player_compression",
+        "il2cpp_code_generation",
+        "min_sdk",
+        "target_sdk_requested",
+        "build_options",
+        "export_mode"
+      ],
+      "additionalProperties": false
+    },
+    "repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repo_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "relative_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "main",
+              "submodule",
+              "art",
+              "config",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "repo_key",
+          "revision",
+          "dirty",
+          "relative_path",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "toolchain": {
+      "type": "object",
+      "properties": {
+        "java_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gradle_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agp_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ndk_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "android_build_tools_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exporter_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "java_version",
+        "gradle_version",
+        "agp_version",
+        "ndk_version",
+        "android_build_tools_version",
+        "exporter_version"
+      ],
+      "additionalProperties": false
+    },
+    "content_policy": {
+      "type": "object",
+      "properties": {
+        "builtin_policy_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scene_guids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "builtin_policy_hash",
+        "scene_guids"
+      ],
+      "additionalProperties": false
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "project_key",
+    "variant",
+    "platform",
+    "artifact_type",
+    "application_id",
+    "version_name",
+    "version_code",
+    "channel",
+    "branch",
+    "build_completed_at",
+    "ci",
+    "settings",
+    "repositories",
+    "toolchain",
+    "content_policy",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BuildSize build-meta v1"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "BuildSize.Editor.Tests",
+  "references": ["BuildSize.Editor"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

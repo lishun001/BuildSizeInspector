@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "buildsize-inspector"
+version = "0.1.0"
+description = "Unity APK 包体变化检测：协议、离线分析和服务基础"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic>=1.14,<2",
+  "argon2-cffi>=23.1,<26",
+  "celery[redis]>=5.5,<6",
+  "fastapi>=0.115,<1",
+  "jsonschema>=4.23,<5",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic>=2.10,<3",
+  "sqlalchemy>=2.0,<2.1",
+  "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+  "httpx2>=2.16.2,<3",
+  "hypothesis>=6.125,<7",
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<10",
+  "ruff>=0.11,<1",
+  "types-jsonschema>=4.23,<5",
+]
+
+[project.scripts]
+buildsize = "buildsize.cli:main"
+buildsize-admin = "buildsize.admin:main"
+buildsize-worker = "buildsize.jobs.celery_app:main"
+buildsize-dispatcher = "buildsize.jobs.dispatcher:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --tb=short"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["buildsize"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/buildsize"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/buildsize"]

@@ -1,0 +1,8 @@
+{
+  "name": "BuildSize.Editor",
+  "rootNamespace": "BuildSize.Editor",
+  "references": [],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true,
+  "noEngineReferences": false
+}

@@ -1,0 +1,39 @@
+{
+  "fixture": "synthetic ZIP/Unity JSON, not a real Unity APK",
+  "apk_bytes": 524288000,
+  "apk_entries": 20000,
+  "unity_records": 50000,
+  "upload_seconds": 3.947737666996545,
+  "finalize_request_seconds": 0.24718379200203344,
+  "accepted_202_to_ready_seconds": 7.2357350410020445,
+  "worker_peak_rss_bytes": 269127680,
+  "pagination": {
+    "entries": {
+      "samples": 50,
+      "p95_ms": 8.096958990790881,
+      "median_ms": 6.92762499966193
+    },
+    "unity-assets": {
+      "samples": 50,
+      "p95_ms": 44.411166993086226,
+      "median_ms": 41.63304200483253
+    }
+  },
+  "worker_cpu_quota": 4,
+  "worker_memory_limit_bytes": 2147483648,
+  "rss_target_bytes": 1073741824,
+  "hardware_note": "Docker Desktop VM on Apple Silicon; shared virtual disk, not a dedicated SSD test host",
+  "worker_cgroup_peak_bytes": 320503808,
+  "measured_at_utc": "2026-11-18T01:27:18.563217+00:00",
+  "backend_image_id": "sha256:d7d4a9afe623789b2948bbe00217a9f54afe5a4c35ebee332fd0a96c684b9cf1",
+  "target_checks": {
+    "rss_below_1gib": true,
+    "pagination_p95_below_1s": true
+  },
+  "docker_vm": {
+    "NCPU": 14,
+    "MemTotal": 8318976000,
+    "Architecture": "aarch64",
+    "ServerVersion": "29.7.2"
+  }
+}

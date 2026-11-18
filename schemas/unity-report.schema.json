@@ -1,0 +1,174 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "exporter_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "unity_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capture_mode": {
+      "enum": [
+        "buildplayer_return",
+        "postprocess_callback"
+      ]
+    },
+    "build_result": {
+      "enum": [
+        "Succeeded",
+        "Failed",
+        "Cancelled",
+        "Unknown"
+      ]
+    },
+    "detailed_report_requested": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "unity_reported_total_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "containers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "container_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "short_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "overhead_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "record_index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "source_guid": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[a-f0-9]{32}$"
+                },
+                "source_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "asset_type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "packed_bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "record_index",
+                "source_guid",
+                "source_path",
+                "asset_type",
+                "packed_bytes"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "container_index",
+          "short_path",
+          "overhead_bytes",
+          "entries"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "path",
+          "role",
+          "bytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "exporter_version",
+    "unity_version",
+    "captured_at",
+    "capture_mode",
+    "build_result",
+    "detailed_report_requested",
+    "unity_reported_total_bytes",
+    "containers",
+    "output_files",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BuildSize unity-report v1"
+}

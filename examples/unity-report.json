@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "76be5fa4-8c26-4a99-b94b-2a559b17b821",
+  "exporter_version": "0.1.0",
+  "unity_version": "6000.0.76f1",
+  "captured_at": "2026-11-17T06:59:58Z",
+  "capture_mode": "buildplayer_return",
+  "build_result": "Succeeded",
+  "detailed_report_requested": true,
+  "unity_reported_total_bytes": 104857600,
+  "containers": [
+    {
+      "container_index": 0,
+      "short_path": "sharedassets0.assets",
+      "overhead_bytes": 1024,
+      "entries": [
+        {
+          "record_index": 0,
+          "source_guid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_path": "Assets/UI/Background.png",
+          "asset_type": "UnityEngine.Texture2D",
+          "packed_bytes": 2097152
+        },
+        {
+          "record_index": 1,
+          "source_guid": null,
+          "source_path": null,
+          "asset_type": "UnityEngine.Texture2D",
+          "packed_bytes": 524288
+        }
+      ]
+    }
+  ],
+  "output_files": [
+    {
+      "path": "BuildOutput/game.apk",
+      "role": "Executable",
+      "bytes": 104857600
+    }
+  ],
+  "warnings": [
+    "示例仅说明格式；数值不能与不存在的示例 APK 做真实归因。"
+  ]
+}

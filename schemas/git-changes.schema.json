@@ -1,0 +1,151 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "requested_base_build_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repo_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "base_revision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+          },
+          "head_revision": {
+            "type": "string",
+            "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+          },
+          "range_status": {
+            "enum": [
+              "complete",
+              "no_baseline",
+              "missing_base",
+              "unrelated_history",
+              "failed"
+            ]
+          },
+          "is_ancestor": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "enum": [
+                    "A",
+                    "M",
+                    "D",
+                    "R",
+                    "C",
+                    "T",
+                    "U",
+                    "X"
+                  ]
+                },
+                "old_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "new_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "old_blob": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+                },
+                "new_blob": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+                },
+                "source_guid": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[a-f0-9]{32}$"
+                }
+              },
+              "required": [
+                "status",
+                "old_path",
+                "new_path",
+                "old_blob",
+                "new_blob",
+                "source_guid"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "commit_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "repo_key",
+          "base_revision",
+          "head_revision",
+          "range_status",
+          "is_ancestor",
+          "changes",
+          "commit_ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "requested_base_build_id",
+    "repositories",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BuildSize git-changes v1"
+}

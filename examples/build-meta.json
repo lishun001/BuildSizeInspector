@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "run_id": "76be5fa4-8c26-4a99-b94b-2a559b17b821",
+  "project_key": "demo-game",
+  "variant": "android-release-arm64",
+  "platform": "Android",
+  "artifact_type": "APK",
+  "application_id": "com.example.demogame",
+  "version_name": "1.2.3",
+  "version_code": 123,
+  "channel": "internal",
+  "branch": "main",
+  "build_completed_at": "2026-11-17T07:00:00Z",
+  "ci": {
+    "instance_id": "jenkins-main",
+    "job_full_name": "games/demo/android-release",
+    "build_number": "1082",
+    "build_url": "https://jenkins.example.invalid/job/demo/1082/"
+  },
+  "settings": {
+    "unity_version": "6000.0.76f1",
+    "scripting_backend": "IL2CPP",
+    "architectures": [
+      "arm64-v8a"
+    ],
+    "development_build": false,
+    "managed_stripping_level": "High",
+    "strip_engine_code": true,
+    "player_compression": "LZ4HC",
+    "il2cpp_code_generation": "OptimizeSize",
+    "min_sdk": 23,
+    "target_sdk_requested": "36",
+    "build_options": [
+      "CompressWithLz4HC",
+      "DetailedBuildReport"
+    ],
+    "export_mode": "direct_apk"
+  },
+  "repositories": [
+    {
+      "repo_key": "game",
+      "revision": "1111111111111111111111111111111111111111",
+      "dirty": false,
+      "relative_path": ".",
+      "kind": "main"
+    },
+    {
+      "repo_key": "art",
+      "revision": "2222222222222222222222222222222222222222",
+      "dirty": false,
+      "relative_path": "art_assets",
+      "kind": "submodule"
+    }
+  ],
+  "toolchain": {
+    "java_version": null,
+    "gradle_version": null,
+    "agp_version": null,
+    "ndk_version": null,
+    "android_build_tools_version": null,
+    "exporter_version": "0.1.0"
+  },
+  "content_policy": {
+    "builtin_policy_hash": null,
+    "scene_guids": []
+  },
+  "warnings": [
+    "示例数据；版本、提交和构建编号并不代表真实构建。"
+  ]
+}

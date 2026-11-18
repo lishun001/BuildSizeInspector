@@ -1,0 +1,86 @@
+# 独立完整栈；不覆盖根目录供本机进程使用的开发数据库配置。
+x-app: &app
+  image: ${BUILDSIZE_API_IMAGE:-buildsize-api:local}
+  build: {context: .., dockerfile: deploy/Dockerfile.api}
+  environment: &env
+    DATABASE_URL: ${DATABASE_URL:?请设置容器内 PostgreSQL URL}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?请设置同源地址}
+    SESSION_SECRET: ${SESSION_SECRET:?请配置会话密钥}
+    TOKEN_HASH_PEPPER: ${TOKEN_HASH_PEPPER:?请配置 token pepper}
+    APP_ENV: ${APP_ENV:-production}
+    REDIS_URL: redis://redis:6379/0
+    BLOB_ROOT: /data/blobs
+    TRUSTED_LINK_HOSTS: ${TRUSTED_LINK_HOSTS:-}
+    UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-2147483648}
+    UPLOAD_TIMEOUT_SECONDS: ${UPLOAD_TIMEOUT_SECONDS:-900}
+    ANALYSIS_TIMEOUT_SECONDS: ${ANALYSIS_TIMEOUT_SECONDS:-1200}
+    APK_RETENTION_DAYS: ${APK_RETENTION_DAYS:-30}
+    REPORT_RETENTION_DAYS: ${REPORT_RETENTION_DAYS:-180}
+    METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-365}
+  volumes: [blobs:/data/blobs]
+  read_only: true
+  tmpfs: ['/tmp:size=64m,mode=1777']
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  init: true
+  mem_limit: 1g
+  cpus: 1
+  restart: unless-stopped
+services:
+  postgres:
+    image: postgres:16.11-bookworm@sha256:a2420e9555e2224583fe84d0bb3f0b967e69354ae3a0be55a9c14e251388c4eb
+    environment:
+      POSTGRES_USER: buildsize
+      POSTGRES_DB: buildsize
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请配置数据库密码}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck: {test: [CMD-SHELL, 'pg_isready -U buildsize -d buildsize'], interval: 2s, timeout: 3s, retries: 30}
+    restart: unless-stopped
+    mem_limit: 1g
+  redis:
+    image: redis:7.4.6-bookworm@sha256:a9cc41d6d01da2aa26c219e4f99ecbeead955a7b656c1c499cce8922311b2514
+    command: [redis-server, --appendonly, 'yes', --maxmemory, 256mb, --maxmemory-policy, noeviction]
+    volumes: [redis_data:/data]
+    healthcheck: {test: [CMD, redis-cli, ping], interval: 2s, timeout: 3s, retries: 30}
+    restart: unless-stopped
+    mem_limit: 384m
+  migrate:
+    <<: *app
+    command: [alembic, -c, /app/backend/alembic.ini, upgrade, head]
+    restart: 'no'
+    depends_on: {postgres: {condition: service_healthy}}
+  api:
+    <<: *app
+    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=2).close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  worker:
+    <<: *app
+    command: [buildsize-worker]
+    mem_limit: 2g
+    cpus: 4
+    stop_grace_period: 60s
+    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+  scheduler:
+    <<: *app
+    command: [buildsize-dispatcher]
+    depends_on: {migrate: {condition: service_completed_successfully}, redis: {condition: service_healthy}}
+  web:
+    image: ${BUILDSIZE_WEB_IMAGE:-buildsize-web:local}
+    build: {context: .., dockerfile: deploy/Dockerfile.web}
+    ports: ['127.0.0.1:${BUILDSIZE_WEB_PORT:-8080}:8080']
+    depends_on: {api: {condition: service_healthy}}
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck: {test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/api/v1/health/live'], interval: 3s, timeout: 3s, retries: 20}
+volumes:
+  postgres_data:
+  redis_data:
+  blobs:

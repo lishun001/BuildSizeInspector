@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "run_id": "76be5fa4-8c26-4a99-b94b-2a559b17b821",
+  "unity_version": "6000.0.76f1",
+  "captured_at": "2026-11-17T06:59:59Z",
+  "coverage": {
+    "requested_count": 1,
+    "collected_count": 1,
+    "failed_count": 0
+  },
+  "assets": [
+    {
+      "source_guid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_path": "Assets/UI/Background.png",
+      "importer_type": "TextureImporter",
+      "dependency_hash": "33333333333333333333333333333333",
+      "source_sha256": null,
+      "meta_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "settings": {
+        "texture_type": "Sprite",
+        "mipmap_enabled": false,
+        "is_readable": false,
+        "srgb": true,
+        "android": {
+          "overridden": true,
+          "max_texture_size": 2048,
+          "format": "ASTC_6x6",
+          "compression_quality": 50,
+          "crunched_compression": false
+        }
+      },
+      "unsupported_fields": [
+        "effective_texture_format"
+      ]
+    }
+  ],
+  "warnings": []
+}

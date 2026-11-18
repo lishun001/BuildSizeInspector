@@ -1,0 +1,126 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "unity_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "requested_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "collected_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "requested_count",
+        "collected_count",
+        "failed_count"
+      ],
+      "additionalProperties": false
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_guid": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "source_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "importer_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dependency_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "meta_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "unsupported_fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "source_guid",
+          "source_path",
+          "importer_type",
+          "dependency_hash",
+          "source_sha256",
+          "meta_sha256",
+          "settings",
+          "unsupported_fields"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "unity_version",
+    "captured_at",
+    "coverage",
+    "assets",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BuildSize asset-importers v1"
+}

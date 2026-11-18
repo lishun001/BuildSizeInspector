@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "compose_services": [
+    "web",
+    "api",
+    "worker",
+    "scheduler",
+    "postgres",
+    "redis"
+  ],
+  "checks": [
+    "empty_migration",
+    "same_origin_spa",
+    "stream_upload",
+    "real_worker_comparison",
+    "restart_persistence",
+    "offline_backup",
+    "empty_volume_restore",
+    "restored_login",
+    "restored_token",
+    "restored_download",
+    "restored_reanalysis"
+  ],
+  "apk_fixture": "synthetic ZIP, not installable APK",
+  "external_tls": "NOT_VERIFIED",
+  "production_browser": "PASS",
+  "spoofed_forwarded_header_rate_limit": "PASS"
+}
