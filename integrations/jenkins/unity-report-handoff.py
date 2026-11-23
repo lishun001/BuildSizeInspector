@@ -297,14 +297,21 @@ class UploadApi:
             raise HandoffError("需要 BuildSize HTTPS 地址和项目令牌，HTTP 只允许本机验证")
         prefix = self.address.path
         self.prefix = prefix if prefix.endswith("/api/v1") else prefix + "/api/v1"
+        self.ssl_context = None
+        ca_file = os.environ.get("SSL_CERT_FILE")
+        if self.address.scheme == "https" and ca_file:
+            try:
+                self.ssl_context = ssl.create_default_context(cafile=ca_file)
+            except OSError as error:
+                raise HandoffError("BuildSize 无法加载 SSL_CERT_FILE 指定的 HTTPS 证书") from error
 
     def request(self, method, path, body, headers):
-        kind = (
-            http.client.HTTPSConnection
-            if self.address.scheme == "https"
-            else http.client.HTTPConnection
-        )
-        conn = kind(self.address.hostname, self.address.port, timeout=120)
+        if self.address.scheme == "https":
+            conn = http.client.HTTPSConnection(
+                self.address.hostname, self.address.port, timeout=120, context=self.ssl_context
+            )
+        else:
+            conn = http.client.HTTPConnection(self.address.hostname, self.address.port, timeout=120)
         try:
             conn.request(
                 method,
@@ -467,8 +474,10 @@ def main():
         print(str(error), file=sys.stderr)
     except KeyboardInterrupt:
         return 130
+    except ssl.SSLCertVerificationError as error:
+        print(f"BuildSize HTTPS 证书校验失败：{error.verify_message}", file=sys.stderr)
     except ssl.SSLError:
-        print("BuildSize HTTPS 证书校验失败", file=sys.stderr)
+        print("BuildSize HTTPS 连接失败", file=sys.stderr)
     except (
         OSError,
         ValueError,

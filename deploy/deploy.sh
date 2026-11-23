@@ -130,10 +130,18 @@ else
     printf '使用已有配置 %s\n' "$env_file"
 fi
 
-compose config --quiet
-# 只提取非敏感配置。Compose 的完整插值环境不输出到终端。
+# 从当前编排提取公开地址、主机白名单和唯一发布端口。完整配置不输出到终端。
+settings=$(compose config | awk '
+    /^      (PUBLIC_BASE_URL|TRUSTED_LINK_HOSTS|APK_DOWNLOAD_HOSTS|published): / && !seen[$1]++ {
+        key = $1
+        sub(/:$/, "", key)
+        if (key == "published") key = "BUILDSIZE_WEB_PORT"
+        sub(/^[[:space:]]*[^:]+:[[:space:]]*/, "")
+        if ($0 ~ /^".*"$/) $0 = substr($0, 2, length($0) - 2)
+        print key "=" $0
+    }')
 setting() {
-    compose config --environment | awk -v key="$1" \
+    printf '%s\n' "$settings" | awk -v key="$1" \
         'index($0, key "=") == 1 { print substr($0, length(key) + 2) }'
 }
 for pair in "PUBLIC_BASE_URL=$public_url" "TRUSTED_LINK_HOSTS=$jenkins_host" \
@@ -144,6 +152,8 @@ for pair in "PUBLIC_BASE_URL=$public_url" "TRUSTED_LINK_HOSTS=$jenkins_host" \
     current=$(setting "$key")
     [[ "${current%/}" = "$expected" ]] || fail "$key 与已有配置不同，请先修改 $env_file"
 done
+public_url=$(setting PUBLIC_BASE_URL)
+[[ -n "$public_url" ]] || fail '无法读取 Compose 中的 PUBLIC_BASE_URL'
 
 printf '%s\n' '正在构建 API 与 Web 镜像'
 compose build api web
@@ -156,7 +166,6 @@ ready=$(compose exec -T web wget -q -T 5 -O - http://127.0.0.1:8080/api/v1/healt
     fail 'Web 容器无法访问 API 就绪接口'
 [[ "$ready" = '{"status":"ready"}' ]] || fail 'API 就绪接口返回异常'
 
-public_url=$(setting PUBLIC_BASE_URL)
 binding=$(compose port web 8080)
 printf 'BuildSize 已就绪 · %s\n' "$public_url"
 if [[ "$public_url" = https://* ]]; then

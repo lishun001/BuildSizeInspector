@@ -2,11 +2,16 @@
 
 更新日期：2026-11-23，Asia/Shanghai。
 
+## Jenkins HTTPS 的 CA 加载
+
+- Mac Jenkins 上报脚本显式加载 `SSL_CERT_FILE` 指定的 CA，并在校验失败时输出原因。证书和主机名校验持续生效。
+- `pytest backend/tests/test_ci_pipeline.py backend/tests/test_apk_download.py -q --tb=short` 共 **20 项通过**。测试模拟 Python 忽略默认证书路径，修复前两条 HTTPS 上报用例均复现失败，修复后报告补交和自动下载两条路线均通过。使用修复后的游戏仓库副本，从当前 Mac 验证实际 Linux HTTPS 就绪接口与 `gem-crew` Token 认证。真实 Jenkins 任务待检出新脚本后复测。
+
 ## Linux 一键部署
 
 - `bash deploy/deploy.sh` 复用完整 Compose 栈。首次生成私有环境文件和随机密钥，启动时执行迁移并检查 API 就绪，重跑沿用配置和持久卷。[部署说明](../deploy/README.md#linux-一键部署)
 - `bash -n deploy/deploy.sh`、`git diff --check`、`make contracts` 通过。使用 Docker Desktop 的 Linux 容器引擎，以独立 Compose 项目和临时配置运行脚本两次，验证配置权限为 `0600`、数据库迁移到 `0007_apk_download`、宿主机就绪接口返回 `ready`、冲突参数被拒绝、重跑保留配置和数据库记录。
-- 目标 Linux 主机及 Mac Jenkins 到 HTTPS 网关的连接待实机验收。
+- 在 Ubuntu 22.04 x86_64、Docker Compose v2.17.3 上实机重跑部署。配置读取改用该版本支持的 `compose config`，复用了原配置和持久卷，数据库迁移和服务就绪检查通过。Mac Jenkins 到正式 HTTPS 入口仍待联调。
 
 ## Unity 报告与 APK 后台下载
 

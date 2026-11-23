@@ -421,10 +421,22 @@ def test_portable_mac_report_handoff_without_installed_cli(
             "BUILDSIZE_API_TOKEN": h.headers["authorization"].split()[1],
             "SSL_CERT_FILE": str(cert),
         }
+        # 模拟 Jenkins 上不从默认证书路径读取 SSL_CERT_FILE 的 Python。
+        launcher = """
+import runpy
+import ssl
+import sys
+
+ssl.SSLContext.set_default_verify_paths = lambda self: None
+helper = sys.argv.pop(1)
+sys.argv[0] = helper
+runpy.run_path(helper, run_name="__main__")
+"""
+        isolated_python = [sys.executable, "-I", "-S", "-c", launcher, helper]
 
         def portable(*args):
             proc = subprocess.run(
-                [sys.executable, "-I", "-S", helper, *map(str, args)],
+                [*isolated_python, *map(str, args)],
                 env=environment,
                 capture_output=True,
                 text=True,
@@ -467,8 +479,8 @@ def test_portable_mac_report_handoff_without_installed_cli(
             *(("--apk-url-file", url_file) if automatic else ()),
         )
         untrusted = subprocess.run(
-            [sys.executable, "-I", "-S", helper, *map(str, arguments)],
-            env={**environment, "SSL_CERT_FILE": str(h.tmp_path / "untrusted.crt")},
+            [*isolated_python, *map(str, arguments)],
+            env={**environment, "SSL_CERT_FILE": ""},
             capture_output=True,
             text=True,
             timeout=20,

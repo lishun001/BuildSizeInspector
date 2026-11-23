@@ -18,7 +18,7 @@ flowchart LR
 
 1. 在部署配置填写 `APK_DOWNLOAD_HOSTS`，逗号分隔，列出原始直链及其跳转所需的精确主机名，如 `apk.example.com,cdn.example.com`。使用运维已核实的文件主机。默认空值时远程下载关闭。Jenkins 的 `BUILD_URL` 主机仍单独加入 `TRUSTED_LINK_HOSTS`。
 2. 在 Linux 更新平台代码，执行 `make stack-build && make stack-up`。Compose 的一次性迁移会自动升级到 `0007_apk_download`，API 与 Worker 需要同时更新。
-3. 为目标项目签发 `builds:read` 和 `builds:submit` 权限令牌。Jenkins 在任务构建环境用 **Secret text** 绑定为 `BUILDSIZE_API_TOKEN`。把平台 HTTPS 地址配置为 `BUILDSIZE_API_URL`。内网自签证书可通过 Mac 上的 `SSL_CERT_FILE` 配置。凭据在上传脚本中使用，无需传给 Unity 插件。
+3. 为目标项目签发 `builds:read` 和 `builds:submit` 权限令牌。Jenkins 在任务构建环境用 **Secret text** 绑定为 `BUILDSIZE_API_TOKEN`。把平台 HTTPS 地址配置为 `BUILDSIZE_API_URL`。使用内网 CA 时，在上报 Shell 里导出 `SSL_CERT_FILE`，脚本会显式加载该 PEM 文件进行 TLS 校验。凭据在上传脚本中使用，无需传给 Unity 插件。
 
 ```bash
 docker compose --env-file .env.deploy -p buildsize -f deploy/compose.yaml \
