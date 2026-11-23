@@ -41,6 +41,7 @@ class JobState(Contract):
     state: str
     attempt: ByteCount
     error_code: str | None
+    apk_download_pending: bool
 
 
 class BuildState(Contract):

@@ -22,6 +22,7 @@ class Config:
     analysis_timeout_seconds: int = 1200
     redelivery_seconds: int = 30
     trusted_link_hosts: tuple[str, ...] = ()
+    apk_download_hosts: tuple[str, ...] = ()
     apk_retention_days: int = 30
     report_retention_days: int = 180
     metrics_retention_days: int = 365
@@ -100,6 +101,11 @@ class Config:
             trusted_link_hosts=tuple(
                 host.strip().lower()
                 for host in os.getenv("TRUSTED_LINK_HOSTS", "").split(",")
+                if host.strip()
+            ),
+            apk_download_hosts=tuple(
+                host.strip().lower()
+                for host in os.getenv("APK_DOWNLOAD_HOSTS", "").split(",")
                 if host.strip()
             ),
             apk_retention_days=int(os.getenv("APK_RETENTION_DAYS", "30")),

@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -13,7 +14,7 @@ from buildsize.client.context import metadata
 from buildsize.client.files import ClientError, create_json, hash_file, write_json
 from buildsize.client.git import changes, snapshot
 from buildsize.client.transport import ApiClient
-from buildsize.domain.contracts import Contract, GitChanges, Submission
+from buildsize.domain.contracts import Artifact, Contract, GitChanges, Submission
 from buildsize.domain.distribution import PgyerResult
 from buildsize.domain.urls import validate_public_url
 from buildsize.domain.validation import parse_json, read_json, validate_identity
@@ -24,6 +25,12 @@ ROLES = {
     "asset-importers.json": "asset_importers",
     "packages-lock.json": "packages_lock",
 }
+
+
+def _pgyer_key(value: Any) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
+        raise ClientError("PGYER_BUILD_KEY_INVALID", "请提供蒲公英发布结果里的具体 buildKey")
+    return value
 
 
 def capture(
@@ -79,16 +86,25 @@ def capture(
     return files, parsed["unity-settings.json"], expected
 
 
-def validate_frozen(directory: Path) -> Submission:
+def validate_frozen(directory: Path, *, reports_only: bool = False) -> Submission:
     manifest = Submission.model_validate(read_json(directory / "submission.json", 1024 * 1024))
     frozen = read_json(directory / "collection.json", 1024 * 1024)
     if frozen.get("manifest_sha256") != manifest.manifest_sha256():
         raise ClientError("FROZEN_MANIFEST_CHANGED", "冻结清单被修改", 5)
+    key = frozen.get("pgyer_build_key")
+    if reports_only != (key is not None):
+        raise ClientError("FROZEN_APK_MODE_MISMATCH", "提交方式与冻结目录的 APK 来源不一致", 5)
+    if reports_only:
+        _pgyer_key(key)
+        if not any(item.role == "unity_report" for item in manifest.artifacts):
+            raise ClientError("UNITY_REPORT_REQUIRED", "分步提交需要本次 Unity 构建报告")
     from buildsize.domain.contracts import AssetImporters, BuildMeta, UnityReport
 
     reports: list[UnityReport | AssetImporters | GitChanges] = []
     meta = None
     for item in manifest.artifacts:
+        if reports_only and item.role == "apk":
+            continue
         path = directory / item.filename
         if path.is_symlink() or not path.is_file():
             raise ClientError("FROZEN_FILE_INVALID", "冻结目录存在无效产物", 5)
@@ -141,16 +157,22 @@ def collect(
     output: Path,
     completed_at: str | None = None,
     timeout: float = 900,
+    *,
+    pgyer_build_key: str | None = None,
 ) -> dict[str, Any]:
+    reports_only = pgyer_build_key is not None
+    if reports_only:
+        _pgyer_key(pgyer_build_key)
     context = read_json(context_file, 1024 * 1024)
     if output.exists():
-        manifest = validate_frozen(output)
+        manifest = validate_frozen(output, reports_only=reports_only)
         frozen = read_json(output / "collection.json", 1024 * 1024)
         size, sha = hash_file(apk)
         expected = next(item for item in manifest.artifacts if item.role == "apk")
         if (
             manifest.run_id != context.get("run_id")
             or frozen.get("context_sha256") != fingerprint(context)
+            or frozen.get("pgyer_build_key") != pgyer_build_key
             or (size, sha) != (expected.bytes, expected.sha256)
         ):
             raise ClientError("FROZEN_IDENTITY_CONFLICT", "已冻结目录不属于本次上下文或 APK", 5)
@@ -160,6 +182,8 @@ def collect(
             "state": "already_frozen",
         }
     captured, unity, expected_capture = capture(context)
+    if reports_only and "unity-report.json" not in captured:
+        raise ClientError("UNITY_REPORT_REQUIRED", "分步提交需要本次 Unity 构建报告和采集回执")
     repos = []
     for prepared in context["repositories"]:
         old = prepared["snapshot"]
@@ -232,7 +256,8 @@ def collect(
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".buildsize-collect-", dir=output.parent))
     try:
-        _copy(apk, staging / "game.apk", 2 * 1024**3)
+        if not reports_only:
+            _copy(apk, staging / "game.apk", 2 * 1024**3)
         payloads: list[dict[str, Any]] = [{"role": "apk", "filename": "game.apk"}]
         write_json(meta.model_dump(mode="json"), staging / "build-meta.json")
         write_json(git_report.model_dump(mode="json"), staging / "git-changes.json")
@@ -259,7 +284,8 @@ def collect(
             _copy(lock, staging / "packages-lock.json", 64 * 1024**2)
             payloads.append({"role": "packages_lock", "filename": "packages-lock.json"})
         for row in payloads:
-            row["bytes"], row["sha256"] = hash_file(staging / row["filename"])
+            source = apk if reports_only and row["role"] == "apk" else staging / row["filename"]
+            row["bytes"], row["sha256"] = hash_file(source)
         manifest = Submission.model_validate(
             {
                 "schema_version": 1,
@@ -276,10 +302,11 @@ def collect(
                 "schema_version": 1,
                 "context_sha256": fingerprint(context),
                 "manifest_sha256": manifest.manifest_sha256(),
+                **({"pgyer_build_key": pgyer_build_key} if reports_only else {}),
             },
             staging / "collection.json",
         )
-        validate_frozen(staging)
+        validate_frozen(staging, reports_only=reports_only)
         os.rename(staging, output)
     finally:
         if staging.exists():
@@ -294,36 +321,38 @@ def _receipt(path: Path, client: ApiClient) -> dict[str, Any]:
     if value.get("api_url") != client.url:
         raise ClientError("RECEIPT_API_CONFLICT", "回执 API 与当前环境不一致，未发送凭据", 3)
     try:
-        uuid.UUID(value["build_id"])
-        uuid.UUID(value["run_id"])
+        for field in ("build_id", "run_id"):
+            raw = value[field]
+            if not isinstance(raw, str):
+                raise ValueError
+            uuid.UUID(raw)
     except (KeyError, ValueError, TypeError):
         raise ClientError("RECEIPT_INVALID", "回执身份无效", 5) from None
     return value
 
 
-def submit(directory: Path, receipt: Path, timeout: float = 900) -> dict[str, Any]:
-    client = ApiClient(timeout=timeout)
-    manifest = validate_frozen(directory)
-    if receipt.exists():
-        existing = _receipt(receipt, client)
-        if (
-            existing.get("run_id") != manifest.run_id
-            or existing.get("manifest_sha256") != manifest.manifest_sha256()
-        ):
-            raise ClientError("RECEIPT_IDENTITY_CONFLICT", "已有回执属于其他冻结提交", 5)
+def _initialize(client: ApiClient, manifest: Submission) -> dict[str, Any]:
     _, initialized = client.request(
         "POST",
         f"/projects/{quote(manifest.project_key, safe='')}/builds",
         body=manifest.model_dump(mode="json"),
         headers={"Idempotency-Key": manifest.run_id},
     )
+    return initialized
+
+
+def _verify_remote(
+    remote: dict[str, Any], manifest: Submission, expected_id: str | None = None
+) -> tuple[str, dict[str, dict[str, Any]]]:
     try:
-        build_id = str(uuid.UUID(initialized["build_id"]))
-        if str(uuid.UUID(initialized["run_id"])) != manifest.run_id:
+        build_id = str(uuid.UUID(str(remote["build_id"])))
+        if str(uuid.UUID(str(remote["run_id"]))) != manifest.run_id or (
+            expected_id is not None and expected_id != build_id
+        ):
             raise ValueError
     except (KeyError, ValueError, TypeError):
-        raise ClientError("INITIALIZE_RESPONSE_INVALID", "初始化响应身份不匹配", 5) from None
-    rows = initialized.get("artifacts", [])
+        raise ClientError("BUILD_RESPONSE_INVALID", "服务端构建身份与清单不匹配", 5) from None
+    rows = remote.get("artifacts", [])
     expected_roles = {item.role for item in manifest.artifacts}
     if (
         not isinstance(rows, list)
@@ -332,24 +361,61 @@ def submit(directory: Path, receipt: Path, timeout: float = 900) -> dict[str, An
         or {row.get("role") for row in rows} != expected_roles
         or len(rows) != len(expected_roles)
     ):
-        raise ClientError("INITIALIZE_RESPONSE_INVALID", "初始化响应角色清单不一致", 5)
+        raise ClientError("BUILD_RESPONSE_INVALID", "服务端角色清单不一致", 5)
     states = {row["role"]: row for row in rows}
     for item in manifest.artifacts:
-        state = states.get(item.role, {})
-        if state.get("state") == "verified":
-            if (state.get("bytes"), state.get("sha256")) != (item.bytes, item.sha256):
-                raise ClientError("VERIFIED_ARTIFACT_CONFLICT", "服务端角色状态与冻结清单不符", 5)
-            continue
-        client.request(
-            "PUT",
-            f"/builds/{build_id}/artifacts/{item.role}",
-            file=directory / item.filename,
-            headers={"Content-Length": str(item.bytes), "X-Content-SHA256": item.sha256},
-        )
+        state = states[item.role]
+        if (state.get("bytes"), state.get("sha256")) != (item.bytes, item.sha256):
+            raise ClientError("ARTIFACT_DECLARATION_CONFLICT", "服务端产物与冻结清单不符", 5)
+    return build_id, states
+
+
+def _upload(client: ApiClient, build_id: str, item: Artifact, path: Path) -> None:
+    client.request(
+        "PUT",
+        f"/builds/{build_id}/artifacts/{item.role}",
+        file=path,
+        headers={"Content-Length": str(item.bytes), "X-Content-SHA256": item.sha256},
+    )
+
+
+def _finalize(client: ApiClient, build_id: str) -> dict[str, Any]:
     status, finalized = client.request("POST", f"/builds/{build_id}/finalize", body={})
     if status != 202 or finalized.get("build_id") != build_id:
         raise ClientError("FINALIZE_RESPONSE_INVALID", "封存没有返回有效的 202", 5)
-    report_url = finalized.get("report_url")
+    return finalized
+
+
+def submit(
+    directory: Path, receipt: Path, timeout: float = 900, *, reports_only: bool = False
+) -> dict[str, Any]:
+    client = ApiClient(timeout=timeout)
+    manifest = validate_frozen(directory, reports_only=reports_only)
+    extra: dict[str, Any] = {}
+    if reports_only:
+        frozen = read_json(directory / "collection.json", 1024 * 1024)
+        extra = {
+            "pgyer_build_key": _pgyer_key(frozen.get("pgyer_build_key")),
+            "manifest": manifest.model_dump(mode="json"),
+        }
+    existing = _receipt(receipt, client) if receipt.exists() else None
+    if existing is not None and (
+        existing.get("run_id") != manifest.run_id
+        or existing.get("manifest_sha256") != manifest.manifest_sha256()
+        or existing.get("pgyer_build_key") != extra.get("pgyer_build_key")
+    ):
+        raise ClientError("RECEIPT_IDENTITY_CONFLICT", "已有回执属于其他冻结提交", 5)
+    initialized = _initialize(client, manifest)
+    build_id, states = _verify_remote(
+        initialized, manifest, existing["build_id"] if existing else None
+    )
+    for item in manifest.artifacts:
+        if reports_only and item.role == "apk":
+            continue
+        if states[item.role].get("state") != "verified":
+            _upload(client, build_id, item, directory / item.filename)
+    result = initialized if reports_only else _finalize(client, build_id)
+    report_url = result.get("report_url")
     if report_url:
         validate_public_url(report_url)
     value = {
@@ -360,11 +426,51 @@ def submit(directory: Path, receipt: Path, timeout: float = 900) -> dict[str, An
         "project_key": manifest.project_key,
         "manifest_sha256": manifest.manifest_sha256(),
         "report_url": report_url,
+        **extra,
     }
     if not create_json(value, receipt):
         current = _receipt(receipt, client)
         if current != value:
             raise ClientError("RECEIPT_IDENTITY_CONFLICT", "并发回执冲突，未覆盖", 5)
+    return {
+        **value,
+        "upload_state": result.get("upload_state"),
+        "analysis_state": result.get("analysis_state"),
+    }
+
+
+def complete_apk(receipt: Path, apk: Path, timeout: float = 900) -> dict[str, Any]:
+    client = ApiClient(timeout=timeout)
+    value = _receipt(receipt, client)
+    _pgyer_key(value.get("pgyer_build_key"))
+    manifest = Submission.model_validate(value.get("manifest"))
+    if (
+        manifest.run_id != value["run_id"]
+        or manifest.project_key != value.get("project_key")
+        or manifest.manifest_sha256() != value.get("manifest_sha256")
+    ):
+        raise ClientError("RECEIPT_IDENTITY_CONFLICT", "回执清单身份或摘要不一致", 5)
+    expected = next(item for item in manifest.artifacts if item.role == "apk")
+    if hash_file(apk) != (expected.bytes, expected.sha256):
+        raise ClientError("PGYER_APK_MISMATCH", "下载的 APK 与原始最终包的长度或 SHA-256 不符", 5)
+
+    # 先确认回执指向已存在的构建，再续期。无效回执不能在补传时新建构建。
+    _, current = client.request("GET", f"/builds/{value['build_id']}")
+    build_id, states = _verify_remote(current, manifest, value["build_id"])
+    if not all(
+        state.get("state") == "verified" and not state.get("expired_at")
+        for role, state in states.items()
+        if role != "apk"
+    ):
+        raise ClientError("REPORTS_NOT_AVAILABLE", "报告还未上传齐全或已经过期，不能补交 APK", 5)
+    if current.get("upload_state") != "SEALED":
+        _, states = _verify_remote(_initialize(client, manifest), manifest, build_id)
+    apk_state = states["apk"]
+    if apk_state.get("expired_at"):
+        raise ClientError("APK_EXPIRED", "已封存的 APK 已按保留策略过期，不能重新补交", 5)
+    if apk_state.get("state") != "verified":
+        _upload(client, build_id, expected, apk)
+    finalized = _finalize(client, build_id)
     return {
         **value,
         "upload_state": finalized.get("upload_state"),
@@ -386,6 +492,9 @@ def link_pgyer(receipt: Path, result_file: Path, timeout: float = 900) -> dict[s
     # 仅白名单字段，绝不把传输响应的 token/signature/apiKey 发给平台。
     payload = {key: raw.get(key) for key in PgyerResult.model_fields}
     result = PgyerResult.model_validate(payload)
+    pgyer_key = value.get("pgyer_build_key")
+    if pgyer_key and result.publish_state == "published" and result.build_key != pgyer_key:
+        raise ClientError("PGYER_BUILD_KEY_MISMATCH", "发布结果的 buildKey 与上传回执不符", 5)
     _, linked = client.request(
         "PUT",
         f"/builds/{value['build_id']}/distribution/pgyer",

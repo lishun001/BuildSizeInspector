@@ -2,7 +2,40 @@
 
 此目录提供 web/api/worker/scheduler/postgres/redis，外加一次性 migrate。根目录 compose.yaml 继续供本机开发进程使用。没有自动修改现有 Jenkinsfile、游戏工程或真实发布流程。
 
-## 启动
+## Linux 一键部署
+
+需要正在运行的 Docker Engine、支持 `--wait-timeout` 的 Compose 插件和构建镜像所需的网络。首次生成配置还需要 OpenSSL。[Docker Compose 安装说明](https://docs.docker.com/compose/install/linux/)
+
+```bash
+bash deploy/deploy.sh
+```
+
+首次运行生成权限为 `0600` 的 `.env.deploy`，构建镜像，启动完整栈，等待数据库迁移，再检查 Web 容器能否访问 API 的就绪接口。默认地址为 `http://127.0.0.1:8080`。
+
+在 Linux 上可以再检查宿主机入口，预期返回 `{"status":"ready"}`。
+
+```bash
+curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/health/ready
+```
+
+给 Mac Jenkins 接入时，首次执行下例，把地址和主机名换成实际值。
+
+```bash
+bash deploy/deploy.sh \
+  --public-url https://192.168.1.20:8443 \
+  --jenkins-host jenkins.example.com \
+  --apk-download-hosts apk.example.com,cdn.example.com
+```
+
+- `--public-url` 填 Mac 可访问且信任证书的 HTTPS 入口。用现有网关或 Linux 上的 Nginx 转发到 `http://127.0.0.1:8080`，保留 Host/Origin。证书和网关由部署环境提供。
+- `--jenkins-host` 只填 Jenkins `BUILD_URL` 的主机名。APK 下载白名单只填运维已核实的文件主机，重定向涉及的主机也要列出。空值关闭自动下载。
+- `--port` 设定本机 Web 端口。若首次部署使用 `--port 18080`，HTTPS 网关也要回源到对应端口。
+
+已有部署升级时，先备份，再执行 `bash deploy/deploy.sh`。脚本复用原配置和数据卷。要改地址、端口或白名单，先编辑 `.env.deploy` 再重跑。从本机试用切到 HTTPS 时，将 `APP_ENV` 改为 `production`，将 `PUBLIC_BASE_URL` 改为实际 HTTPS 地址，同时配置 Jenkins 主机和 APK 下载主机。
+
+首次完成后按下文「管理员引导」创建账号和项目。[Jenkins Shell 接入说明](../integrations/jenkins/README.md)
+
+## 手工启动
 
 需要 Docker/Compose、构建网络及足够磁盘空间。复制 deploy/env.example 到仓库根 .env.deploy，在私有文件中填好配置；不能提交该文件、把密钥放在参数/日志中，或打印完整 compose config。APP_ENV=production 要求 PUBLIC_BASE_URL 为实际 HTTPS origin。DATABASE_URL 使用内置 postgres 主机、buildsize 用户/数据库，密码与 POSTGRES_PASSWORD 一致并按 URL 规则编码；SESSION_SECRET/TOKEN_HASH_PEPPER 至少各 32 字符且不同。TRUSTED_LINK_HOSTS 列出真实 Jenkins/安装页的精确主机。
 
@@ -14,6 +47,8 @@ make stack-up
 默认唯一主机端口为 127.0.0.1:8080；API、数据库和 Redis 不发布主机端口。正式环境须由部署者配置真实 HTTPS 入口转发到该地址，保留 Host/Origin，允许最大 2 GiB 请求并匹配上传超时。当前没有配置公网 DNS、证书或真实域名。
 
 只在本机试用时可将私有文件中的 APP_ENV 改为 development，PUBLIC_BASE_URL 改为 http://127.0.0.1:8080。该模式不代表生产 TLS 已验证。不要把开发模式开放到公网。
+
+自动下载 APK 时，在 `.env.deploy` 添加 `APK_DOWNLOAD_HOSTS`，只列出运维已核实的外部 HTTPS 文件主机，逗号分隔，重定向涉及的主机也需列出。空值关闭此功能。API 和 Worker 要使用相同的 `SESSION_SECRET`，待下载链接由该密钥派生的独立密钥加密。IP 检查拒绝内网、本机和其他受限地址，运维可同时在 Worker 出口限制目标网络。更新时执行 `make stack-build && make stack-up`，Compose 会运行 `0007_apk_download` 迁移。
 
 启动顺序为 PostgreSQL 健康 → migrate 成功 → API/Worker/scheduler → API ready → web。迁移失败或 secret 缺失会阻止启动，不能以健康检查 live 代替 ready。更新镜像后先备份，重新 stack-build/stack-up；现有卷不会被自动删除。
 

@@ -2,11 +2,13 @@
 
 当前已实现 M0–M6 本地核心：协议、鉴权、流式 APK 分析、幂等上传、Celery 恢复、Unity Editor 导出与资源比较、CI CLI、多仓 Git、蒲公英结果关联、12 类证据规则、真实 Web 页面、完整本地容器栈和保留/备份恢复。已完成受控真实 Android 构建及本机 CI 数据流验证；用户实际工程、真实 Jenkins/蒲公英、外部生产部署和指定硬件性能仍待验收，见 [实施状态](docs/IMPLEMENTATION_STATUS.md)。
 
-目标：保留现有蒲公英分发，由 Jenkins 自动上传最终 APK、Unity 构建报告和元数据；检测平台提供包体增量、原始资源定位、配置差异与证据化原因分析。
+Mac 上的 Unity 插件导出构建报告。Jenkins Shell 经 HTTPS 上报报告、构建元数据、最终 APK 摘要和下载直链。Linux 平台在后台从运维批准的主机下载 APK，校验大小和 SHA-256 后，汇总包体增量、资源变化与证据。
 
 ## 运行当前实现
 
-需要 Python 3.12、uv、Node 和 pnpm。后端使用项目独立虚拟环境，不依赖 conda。
+Linux 部署用 `bash deploy/deploy.sh`。脚本会生成私有配置、启动 Compose 栈并检查就绪状态。给 Mac Jenkins 接入时，可指定已有 HTTPS 入口及 APK 下载主机。[Linux 部署参数](deploy/README.md#linux-一键部署)
+
+本地开发需要 Python 3.12、uv、Node 和 pnpm。后端使用项目独立虚拟环境，不依赖 conda。
 
 完整集成与端到端验证还需要运行中的 Docker；不具备专用服务时，普通 make test 会明确跳过对应场景。
 
@@ -34,7 +36,7 @@ API、Worker、scheduler 启动及备份说明见 [开发与运维](docs/OPERATI
 
 Unity 包位于 integrations/unity/com.company.buildsize，接入与限制见[导出器说明](integrations/unity/com.company.buildsize/README.md)。本机已有 Unity 6000.0.76f1 时，make unity-test 运行 8 项 EditMode，make unity-validate 另实际生成两份 Android APK；不会升级 Editor 或连接云项目。
 
-CI 的 prepare/collect/submit/status/link-pgyer 用法、配置和 Jenkins 合并示例见 [CI 接入说明](integrations/jenkins/README.md)。客户端按完整 logical key 复用身份，冻结后只补传未验证角色；凭据只从环境读取。示例不接管现有游戏构建和蒲公英发布。
+Shell 上报、下载主机配置和 Jenkins 合并示例见 [CI 接入说明](integrations/jenkins/README.md)。直接上传和 Linux `complete-apk` 仍可用于兼容接入。各路线均按完整 logical key 复用构建身份。
 
 本地页面运行方式见 [Web 说明](frontend/README.md)：设置同源 PUBLIC_BASE_URL 后分别启动 make dev、make worker、make scheduler 和 make web，访问 http://127.0.0.1:5173。页面仅显示已授权项目的真实 API 数据；不含默认账号、CI token 或业务 mock。
 

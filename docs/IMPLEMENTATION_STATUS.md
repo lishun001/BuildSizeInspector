@@ -1,6 +1,37 @@
 # 实施状态
 
-更新日期：2026-11-18，Asia/Shanghai。
+更新日期：2026-11-23，Asia/Shanghai。
+
+## Linux 一键部署
+
+- `bash deploy/deploy.sh` 复用完整 Compose 栈。首次生成私有环境文件和随机密钥，启动时执行迁移并检查 API 就绪，重跑沿用配置和持久卷。[部署说明](../deploy/README.md#linux-一键部署)
+- `bash -n deploy/deploy.sh`、`git diff --check`、`make contracts` 通过。使用 Docker Desktop 的 Linux 容器引擎，以独立 Compose 项目和临时配置运行脚本两次，验证配置权限为 `0600`、数据库迁移到 `0007_apk_download`、宿主机就绪接口返回 `ready`、冲突参数被拒绝、重跑保留配置和数据库记录。
+- 目标 Linux 主机及 Mac Jenkins 到 HTTPS 网关的连接待实机验收。
+
+## Unity 报告与 APK 后台下载
+
+Jenkins Shell 用既有 Unity 插件采集本次报告并上传摘要，再通过 `finalize-from-url` 提交该 APK 的 HTTPS 直链。Worker 下载并校验后封存构建，网页展示包体与资源差异、证据、候选原因，以及后台下载状态。迁移为 `0007_apk_download`，新增配置 `APK_DOWNLOAD_HOSTS`。签名链接在等待期间加密保存，完成或终止后删除。原上传及手工补交入口保留。设计和边界见 ADR-008。
+
+- `pytest backend/tests/test_apk_download.py backend/tests/test_ci_pipeline.py -q --tb=short` 共 **20 项通过**。测试使用控制的真实 HTTPS 响应，覆盖无 CLI 上报、回执和响应不含签名链接、错误哈希拒绝、更新链接重试、同一任务合并报告分析，以及项目和下载地址限制。
+- `make test-postgres-container` 共 **188 项通过，无跳过，68.42 秒**，包括 PostgreSQL 迁移、Redis/Celery 和浏览器回归。
+- `make lint`、`make typecheck`、`make contracts`、`make build`、接入 Shell 及 Jenkinsfile Groovy 语法检查通过。
+- 真实 Jenkins 任务需要确认其发布环节能提供 Linux 可直接访问的 APK 文件链接。实际蒲公英直链和生产下载网络待联调。
+
+## Mac 打包机免装 BuildSize CLI
+
+按用户确认的接入方式，Mac Jenkins 在 Shell 中调用随仓的 `unity-report-handoff.py`，只依赖系统 Python 3 标准库和 Git，通过 HTTPS 上报报告及摘要。回执格式与既有 `complete-apk` 兼容。原 API 和数据库迁移无需变更。准备时记录 Git HEAD 和 dirty 状态，上报时冻结元数据与摘要，重复操作可复用同一构建。完整 Git 差异依然由原 CLI 路线生成。
+
+- `make test-postgres-container` 共 **175 passed，无跳过，65.00 秒**。新增测试禁用第三方 Python 包加载，连接实际 HTTPS API，确认未信任证书时拒绝、持证书仅上传报告、状态保持待补交、重试复用同一构建，以及 Linux CLI 补交 APK 后能执行 Worker 分析。
+- `make lint`、`make typecheck`、`make contracts`、`make build`、Shell 片段和 Jenkinsfile 的 Groovy 语法检查通过。真实 Mac Jenkins 任务、蒲公英文件与内网证书仍待用户环境验收。[Jenkins 配置](../integrations/jenkins/README.md)
+
+## 蒲公英 APK 与 Shell 报告分步提交
+
+按 ADR-007 实现。Mac Shell 仅上报 Unity 报告和构建元数据，同时冻结最终 APK 的长度和 SHA-256。操作者从蒲公英下载指定版本后，在 Linux 按同一回执补交。报告待齐及 APK 核对前不会封存或排队。服务端上传合同、数据库和分析任务沿用原实现。
+
+- 新入口为 `submit-unity-reports.sh` 和 `buildsize complete-apk`，Jenkins 示例已接到原发布确认后的报告上报阶段。[接入说明](../integrations/jenkins/README.md)
+- `make test-postgres-container` 共 **174 passed，无跳过，61.84 秒**。新增 Shell、真实 HTTP 和 Worker 流程覆盖只传报告、同长度错包拒绝、上传窗口续期及重复补交仅创建一个任务。报告为 `.buildsize/postgres-test-results.xml`。
+- `make lint`、`make typecheck`、`make contracts`、`make build`、Shell 语法和 Jenkins 示例的 Groovy 语法检查通过。本机同时有 x64 和 arm64 Node，首次构建选到 x64 后缺少其原生模块，切回本机已安装依赖使用的 arm64 Node 后复测通过。
+- 真实 Jenkins 发布后的 `buildKey`、蒲公英下载文件与生产入口仍待验收。验证使用本机夹具，不涉及真实蒲公英账号或安装 API。
 
 ## M6 当前交付
 

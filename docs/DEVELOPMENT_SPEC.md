@@ -8,7 +8,7 @@
 | 项目代号 | BuildSize Inspector |
 | 主要使用者 | Unity 项目主程、研发、构建维护者 |
 | 首版对象 | Jenkins 产出的最终 Android APK，以及同次构建的 Unity 报告 |
-| 已确定的接入方式 | Jenkins 自动上传；保留现有蒲公英分发 |
+| 已确定的接入方式 | Jenkins Shell 上报 Unity 报告、APK 摘要和 HTTPS 直链，由 Worker 下载并分析。见 ADR-008 |
 | 推荐首个适配目标 | 用户现有 Unity 6.0 项目；优先在实际使用的 6000.0.x 编辑器验证 |
 | 交付性质 | 待实现的开发规格，不是已经开发完成的平台 |
 | 协议依据 | 本文、`../schemas/`、`../examples/` |
@@ -103,6 +103,8 @@ YooAsset 的版本化专用适配放在 P1。P0 必须能把 APK 内的 Bundle �
 API 不负责耗时解包或归因。Worker 不通过网络拉取任意 URL，也不执行 APK 内容。
 
 ### 2.1 系统组成
+
+现行自动下载流程及架构图见 [Jenkins 接入说明](../integrations/jenkins/README.md#现行流程jenkins-上报报告和直链buildsize-自动下载-apk)。报告验收后任务进入 Outbox，Worker 下载 APK、校验并封存后开始分析。下面的系统组成图保留原全量上传路线和共用的分析服务边界。
 
 ```text
 [Unity Editor 插件]

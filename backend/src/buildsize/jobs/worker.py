@@ -45,7 +45,13 @@ from buildsize.jobs.unity_layers import (
     persist_layers,
     read_layers,
 )
-from buildsize.services.builds import PARSER_SET
+from buildsize.services.builds import (
+    PARSER_SET,
+    artifact_rows,
+    record_artifact,
+    seal_build,
+    validate_artifacts,
+)
 from buildsize.services.common import aware, now
 from buildsize.services.comparisons import (
     POLICY_VERSION,
@@ -55,6 +61,7 @@ from buildsize.services.comparisons import (
     eligible,
 )
 from buildsize.services.rules import freeze_rules, persist_findings
+from buildsize.storage.apk_download import download_apk, reveal_url
 from buildsize.storage.local import BlobStorage, LocalBlobStorage
 
 TERMINAL = {"SUCCEEDED", "FAILED", "SUPERSEDED"}
@@ -157,6 +164,7 @@ def valid_lease(db: Session, lease: Lease) -> Job | None:
 
 def _fail_locked(db: Session, job: Job, code: str) -> None:
     job.state, job.error_code = "FAILED", code
+    job.apk_download_secret = None
     if job.kind == "analysis":
         revision = db.get(AnalysisRevision, job.analysis_revision_id)
         assert revision is not None
@@ -450,7 +458,60 @@ def publish_analysis(
         return True
 
 
+def fetch_apk(engine: Engine, config: Config, storage: BlobStorage, lease: Lease) -> bool:
+    with Session(engine) as db, db.begin():
+        job = valid_lease(db, lease)
+        if job is None:
+            return False
+        if job.apk_download_secret is None:
+            return True
+        url = reveal_url(config, job.apk_download_secret)
+        build = db.get(Build, lease.build_id)
+        assert build is not None
+        project_id = build.project_id
+        manifest = Submission.model_validate(build.manifest)
+        item = next(entry for entry in manifest.artifacts if entry.role == "apk")
+        already_present = "apk" in artifact_rows(db, build.id)
+    if not 0 < item.bytes <= config.upload_max_bytes:
+        raise BuildSizeError("UPLOAD_TOO_LARGE", "APK 长度超出限制")
+    check_deadline(lease)
+    started = time.monotonic()
+    log_stage(lease, "apk_download", "started", started)
+    staged = None
+    try:
+        if not already_present:
+            staged = storage.stage(project_id, item.bytes, item.sha256)
+            timeout = min(config.upload_timeout_seconds, (lease.deadline - now()).total_seconds())
+            download_apk(config, url, staged, item.bytes, timeout)
+        with Session(engine) as db, db.begin():
+            job = valid_lease(db, lease)
+            if job is None:
+                return False
+            db.get(Project, project_id, with_for_update=True)
+            build = db.get(Build, lease.build_id, with_for_update=True)
+            revision = db.get(AnalysisRevision, lease.revision_id)
+            assert build is not None and revision is not None
+            if build.requested_analysis_id != revision.id:
+                job.state, revision.status = "SUPERSEDED", "SUPERSEDED"
+                job.apk_download_secret = None
+                return False
+            check_deadline(lease)
+            if staged is not None and "apk" not in artifact_rows(db, build.id):
+                record_artifact(db, build, "apk", staged, item.bytes, item.sha256)
+            metadata, coverage = validate_artifacts(db, storage, build, config)
+            seal_build(db, build, metadata)
+            revision.summary = {"coverage": coverage, "stage": "running"}
+            job.apk_download_secret = None
+        log_stage(lease, "apk_download", "completed", started)
+        return True
+    finally:
+        if staged is not None:
+            staged.close()
+
+
 def run_analysis(engine: Engine, config: Config, storage: BlobStorage, lease: Lease) -> bool:
+    if not fetch_apk(engine, config, storage, lease):
+        return False
     started = time.monotonic()
     log_stage(lease, "validate_inputs", "started", started)
     with Session(engine) as db:
@@ -581,7 +642,12 @@ def execute_job(
         return state
     except BuildSizeError as exc:
         log_stage(lease, lease.kind, "failed", started, exc.code)
-        fail(engine, lease, exc.code, transient=exc.code in {"INPUT_IO_ERROR", "STORAGE_IO_ERROR"})
+        fail(
+            engine,
+            lease,
+            exc.code,
+            transient=exc.code in {"INPUT_IO_ERROR", "STORAGE_IO_ERROR", "APK_DOWNLOAD_IO"},
+        )
         raise BuildSizeError(exc.code, "任务失败；错误码已保存") from None
     except OSError:
         log_stage(lease, lease.kind, "failed", started, "STORAGE_IO_ERROR")

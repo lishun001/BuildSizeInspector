@@ -4,13 +4,18 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import socket
+import ssl
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -18,9 +23,9 @@ from urllib.request import urlopen
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from test_ci_client import captured_fixture, command, configuration, repository
 from test_ci_client import clean_ci as clean_ci
-from test_ci_client import command, configuration, repository
-from test_pipeline import Harness, init, put, result, run, submission, submit
+from test_pipeline import ROOT, Harness, init, put, result, run, submission, submit
 from test_pipeline import pipeline as pipeline
 
 from buildsize.auth.service import issue_token
@@ -28,14 +33,18 @@ from buildsize.client.files import ClientError
 from buildsize.client.submission import submit as submit_frozen
 from buildsize.client.transport import ApiClient
 from buildsize.db.models import Build, DistributionLink, Job, Project, RepositorySnapshot
+from buildsize.domain.errors import BuildSizeError
+from buildsize.jobs.worker import execute_job
+from buildsize.storage import apk_download
 
 
 @contextmanager
-def live_api(h: Harness, public_origin: str | None = None):
+def live_api(h: Harness, public_origin: str | None = None, *, tls: tuple[Path, Path] | None = None):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
+        scheme = "https" if tls else "http"
+        origin = f"{scheme}://127.0.0.1:{listener.getsockname()[1]}"
         env = {
             **os.environ,
             "DATABASE_URL": h.database_url,
@@ -45,6 +54,7 @@ def live_api(h: Harness, public_origin: str | None = None):
             "APP_ENV": "test",
             "BLOB_ROOT": str(h.config.blob_root),
             "TRUSTED_LINK_HOSTS": "www.pgyer.com,jenkins.example.invalid",
+            "APK_DOWNLOAD_HOSTS": ",".join(h.config.apk_download_hosts),
         }
         process = subprocess.Popen(
             [
@@ -58,6 +68,7 @@ def live_api(h: Harness, public_origin: str | None = None):
                 "--log-level",
                 "error",
                 "--no-access-log",
+                *(["--ssl-certfile", str(tls[0]), "--ssl-keyfile", str(tls[1])] if tls else []),
             ],
             env=env,
             pass_fds=(listener.fileno(),),
@@ -68,7 +79,10 @@ def live_api(h: Harness, public_origin: str | None = None):
             deadline = time.monotonic() + 10
             while True:
                 try:
-                    with urlopen(origin + "/api/v1/health/ready", timeout=0.2) as response:
+                    verify = ssl.create_default_context(cafile=str(tls[0])) if tls else None
+                    with urlopen(
+                        origin + "/api/v1/health/ready", timeout=0.2, context=verify
+                    ) as response:
                         assert response.status == 200
                     break
                 except (URLError, TimeoutError):
@@ -257,7 +271,310 @@ def test_submit_resumes_verified_roles(pipeline: Harness, clean_ci, monkeypatch)
     assert len([method for method, _ in requests if method == "PUT"]) == 2
 
 
-def test_pgyer_authorization_safety_and_idempotency(pipeline: Harness) -> None:
+def test_shell_reports_and_downloaded_apk_complete_one_build(pipeline: Harness, clean_ci) -> None:
+    h = pipeline
+    context, reports, original = captured_fixture(h.tmp_path)
+    _, fixture = submission("apk-fixture")
+    original.write_bytes(fixture["apk"])
+    completed = h.tmp_path / "completed-at.txt"
+    completed.write_text(
+        json.loads((reports / "unity-settings.json").read_text())["build_completed_at"]
+    )
+    directory = h.tmp_path / "report upload"
+    receipt = h.tmp_path / "receipt.json"
+    shell = ROOT / "integrations/jenkins/submit-unity-reports.sh"
+    with live_api(h) as origin:
+        environment = {
+            **os.environ,
+            "BUILDSIZE_API_URL": origin,
+            "BUILDSIZE_API_TOKEN": h.headers["authorization"].split()[1],
+            "BUILDSIZE_BIN": str(Path(sys.executable).with_name("buildsize")),
+        }
+        sent = subprocess.run(
+            [
+                "/bin/sh",
+                shell,
+                context,
+                original,
+                "fixture-build-key",
+                completed,
+                directory,
+                receipt,
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert sent.returncode == 0, sent.stderr
+        assert (
+            environment["BUILDSIZE_API_TOKEN"]
+            not in sent.stdout + sent.stderr + receipt.read_text()
+        )
+        pending = json.loads(sent.stdout)
+        build_id = pending["build_id"]
+        assert pending["upload_state"] == "UPLOADING"
+        assert pending["pgyer_build_key"] == "fixture-build-key"
+        assert not (directory / "game.apk").exists()
+        current = cli(environment, "status", "--receipt", receipt)
+        states = {row["role"]: row["state"] for row in current["artifacts"]}
+        assert states == {
+            "apk": "pending",
+            "build_meta": "verified",
+            "git_changes": "verified",
+            "unity_report": "verified",
+        }
+        assert current["jobs"] == []
+
+        wrong = h.tmp_path / "wrong version.apk"
+        wrong.write_bytes(bytes([fixture["apk"][0] ^ 1]) + fixture["apk"][1:])
+        rejected = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "buildsize",
+                "complete-apk",
+                "--receipt",
+                receipt,
+                "--apk",
+                wrong,
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert rejected.returncode == 5 and "PGYER_APK_MISMATCH" in rejected.stderr
+        assert cli(environment, "status", "--receipt", receipt)["jobs"] == []
+
+        # 运维超过常规上传窗口后仍可用同一个回执续期，报告保持已登记状态。
+        with Session(h.engine) as db:
+            build = db.get(Build, uuid.UUID(build_id))
+            build.upload_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+            db.commit()
+        downloaded = h.tmp_path / "downloaded example.apk"
+        downloaded.write_bytes(fixture["apk"])
+        original.unlink()
+        for _ in range(2):
+            sealed = cli(environment, "complete-apk", "--receipt", receipt, "--apk", downloaded)
+            assert sealed["build_id"] == build_id and sealed["upload_state"] == "SEALED"
+        current = cli(environment, "status", "--receipt", receipt)
+        assert len(current["jobs"]) == 1
+        run(h, current["jobs"][0]["job_id"])
+        analyzed = cli(environment, "status", "--receipt", receipt)
+        assert analyzed["result"]["apk"]["apk_file_bytes"] == len(fixture["apk"])
+        assert analyzed["result"]["unity"]["report_record_count"] == 2
+        assert json.loads(receipt.read_text())["build_id"] == build_id
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="HTTPS 测试需要本机 openssl")
+@pytest.mark.parametrize("automatic", [False, True])
+def test_portable_mac_report_handoff_without_installed_cli(
+    pipeline: Harness,
+    clean_ci,
+    automatic: bool,
+    monkeypatch,
+) -> None:
+    h = pipeline
+    source_context, reports, apk = captured_fixture(h.tmp_path)
+    _, fixture = submission("portable-apk")
+    apk.write_bytes(fixture["apk"])
+    completed_at = h.tmp_path / "completed-at.txt"
+    completed_at.write_text(
+        json.loads((reports / "unity-settings.json").read_text())["build_completed_at"]
+    )
+    state = h.tmp_path / "portable capture"
+    receipt = state / "receipt.json"
+    helper = ROOT / "integrations/jenkins/unity-report-handoff.py"
+    cert, key = h.tmp_path / "server.crt", h.tmp_path / "server.key"
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=127.0.0.1",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1,DNS:apk.example.com",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+    url_file = state / "apk-download-url.txt"
+    url = "https://apk.example.com/final.apk?signature=fixture-signed-url"
+    if automatic:
+        h.config = replace(h.config, apk_download_hosts=("apk.example.com",))
+    with live_api(h, tls=(cert, key)) as origin:
+        environment = {
+            **os.environ,
+            "BUILDSIZE_API_URL": origin,
+            "BUILDSIZE_API_TOKEN": h.headers["authorization"].split()[1],
+            "SSL_CERT_FILE": str(cert),
+        }
+
+        def portable(*args):
+            proc = subprocess.run(
+                [sys.executable, "-I", "-S", helper, *map(str, args)],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert proc.returncode == 0, proc.stderr
+            assert environment["BUILDSIZE_API_TOKEN"] not in proc.stdout + proc.stderr
+            return json.loads(proc.stdout)
+
+        prepared = portable(
+            "prepare",
+            "--directory",
+            state,
+            "--config",
+            h.tmp_path / "config.json",
+            "--workspace",
+            h.tmp_path,
+            "--project",
+            "demo-game",
+            "--variant",
+            "variant",
+        )
+        assert prepared["run_id"] == json.loads(source_context.read_text())["run_id"]
+        assert environment["BUILDSIZE_API_TOKEN"] not in (state / "context.json").read_text()
+        shutil.copytree(reports, prepared["report_directory"])
+        if automatic:
+            url_file.write_text(url)
+        arguments = (
+            "submit",
+            "--directory",
+            state,
+            "--apk",
+            apk,
+            "--pgyer-build-key",
+            "portable-key",
+            "--completed-at-file",
+            completed_at,
+            "--receipt",
+            receipt,
+            *(("--apk-url-file", url_file) if automatic else ()),
+        )
+        untrusted = subprocess.run(
+            [sys.executable, "-I", "-S", helper, *map(str, arguments)],
+            env={**environment, "SSL_CERT_FILE": str(h.tmp_path / "untrusted.crt")},
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert untrusted.returncode == 2 and "HTTPS 证书校验失败" in untrusted.stderr
+        assert not receipt.exists()
+        first = portable(*arguments)
+        (h.tmp_path / "repo" / "untracked-after-submit.txt").write_text("changed workspace")
+        assert portable(*arguments)["build_id"] == first["build_id"]
+        current = cli(environment, "status", "--receipt", receipt)
+        assert {row["role"]: row["state"] for row in current["artifacts"]} == {
+            "apk": "pending",
+            "build_meta": "verified",
+            "unity_report": "verified",
+        }
+
+        if automatic:
+            assert current["analysis_state"] == "QUEUED"
+            assert current["jobs"][0]["apk_download_pending"] is True
+            assert (
+                h.client.post(
+                    f"/api/v1/builds/{first['build_id']}/finalize-from-url",
+                    json={"download_url": url},
+                    headers=h.other_headers,
+                ).status_code
+                == 404
+            )
+            assert "fixture-signed-url" not in json.dumps(first) + receipt.read_text() + json.dumps(
+                current
+            )
+            job_id = uuid.UUID(current["jobs"][0]["job_id"])
+            with Session(h.engine) as db:
+                job = db.get(Job, job_id)
+                assert (
+                    job.apk_download_secret and "fixture-signed-url" not in job.apk_download_secret
+                )
+            # Worker 实际通过 TLS 流式读取。测试只替换已验证公网 IP 到本机夹具的路由。
+            with apk_fixture(cert, key, fixture["apk"], monkeypatch) as requests:
+                with pytest.raises(BuildSizeError, match="错误码") as error:
+                    execute_job(h.engine, h.config, job_id)
+                assert error.value.code == "ARTIFACT_HASH_MISMATCH"
+                failed = cli(environment, "status", "--receipt", receipt)
+                assert failed["analysis_state"] == "FAILED" and failed["analysis_revision"] is None
+                url_file.write_text(url.replace("final.apk", "correct.apk"))
+                assert portable(*arguments)["analysis_state"] == "QUEUED"
+                assert execute_job(h.engine, h.config, job_id) == "PUBLISHED"
+                assert requests == ["/final.apk", "/correct.apk"]
+            with Session(h.engine) as db:
+                assert db.get(Job, job_id).apk_download_secret is None
+        else:
+            assert current["jobs"] == []
+            downloaded = h.tmp_path / "from-pgyer.apk"
+            downloaded.write_bytes(fixture["apk"])
+            sealed = cli(environment, "complete-apk", "--receipt", receipt, "--apk", downloaded)
+            assert sealed["build_id"] == first["build_id"] and sealed["upload_state"] == "SEALED"
+            current = cli(environment, "status", "--receipt", receipt)
+            run(h, current["jobs"][0]["job_id"])
+        current = cli(environment, "status", "--receipt", receipt)
+        assert current["result"]["unity"]["report_record_count"] == 2
+        assert len(current["jobs"]) == 1
+        assert current["jobs"][0]["apk_download_pending"] is False
+
+
+@contextmanager
+def apk_fixture(cert, key, apk, monkeypatch):
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            requests.append(path)
+            data = apk if path == "/correct.apk" else bytes([apk[0] ^ 1]) + apk[1:]
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert, key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connect = socket.create_connection
+
+        def route(address, *args, **kwargs):
+            assert address == ("93.184.216.34", 443)
+            return connect(server.server_address, *args, **kwargs)
+
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(apk_download, "_resolve", lambda host: "93.184.216.34")
+                patch.setattr(socket, "create_connection", route)
+                patch.setenv("SSL_CERT_FILE", str(cert))
+                yield requests
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+def test_pgyer_authorization_safety_and_idempotency(
+    pipeline: Harness,
+) -> None:
     h = pipeline
     build_id, _ = submit(h, *submission("distribution"))
     path = f"/api/v1/builds/{build_id}/distribution/pgyer"

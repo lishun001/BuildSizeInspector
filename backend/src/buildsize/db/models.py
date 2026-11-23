@@ -203,6 +203,7 @@ class Job(Entity):
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_code: Mapped[str | None] = mapped_column(String(128))
+    apk_download_secret: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String(16), default="analysis", server_default="analysis")
     comparison_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("comparisons.id", name="fk_job_comparison")

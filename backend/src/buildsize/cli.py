@@ -14,7 +14,7 @@ from buildsize.analyzers.android_tools import inspect_android
 from buildsize.analyzers.apk_zip import Limits, analyze_apk
 from buildsize.client.context import prepare
 from buildsize.client.files import ClientError, write_json
-from buildsize.client.submission import collect, link_pgyer, status, submit
+from buildsize.client.submission import collect, complete_apk, link_pgyer, status, submit
 from buildsize.comparison.apk import compare_apks
 from buildsize.domain.contracts import (
     AssetImporters,
@@ -121,11 +121,19 @@ def main() -> int:
     gathering.add_argument("--output", type=Path, required=True)
     gathering.add_argument("--completed-at")
     gathering.add_argument("--completed-at-file", type=Path)
+    gathering.add_argument(
+        "--pgyer-build-key", help="仅冻结最终 APK 的大小和 SHA-256，供 Linux 补交"
+    )
     gathering.add_argument("--timeout", type=float, default=900)
     sending = commands.add_parser("submit", help="恢复角色上传并封存，不等待分析")
     sending.add_argument("--directory", type=Path, required=True)
     sending.add_argument("--receipt", type=Path, required=True)
+    sending.add_argument("--reports-only", action="store_true", help="上传报告并登记待补交的 APK")
     sending.add_argument("--timeout", type=float, default=900)
+    completing = commands.add_parser("complete-apk", help="核验下载的 APK，按报告回执补交并封存")
+    completing.add_argument("--receipt", type=Path, required=True)
+    completing.add_argument("--apk", type=Path, required=True)
+    completing.add_argument("--timeout", type=float, default=900)
     polling = commands.add_parser("status", help="按明确回执查询当前状态")
     polling.add_argument("--receipt", type=Path, required=True)
     polling.add_argument("--output", type=Path)
@@ -157,13 +165,24 @@ def main() -> int:
                 if len(raw) > 128:
                     raise ClientError("COMPLETION_FILE_INVALID", "完成时间文件无效")
                 completed = raw.decode().strip()
-            result = collect(args.context, args.apk, args.output, completed, args.timeout)
+            result = collect(
+                args.context,
+                args.apk,
+                args.output,
+                completed,
+                args.timeout,
+                pgyer_build_key=args.pgyer_build_key,
+            )
             write_json(result, None)
             return 0
         elif args.command == "submit":
-            result = submit(args.directory, args.receipt, args.timeout)
+            result = submit(
+                args.directory, args.receipt, args.timeout, reports_only=args.reports_only
+            )
             write_json(result, None)
             return 0
+        elif args.command == "complete-apk":
+            result = complete_apk(args.receipt, args.apk, args.timeout)
         elif args.command == "status":
             result = status(args.receipt, args.timeout)
         elif args.command == "link-pgyer":

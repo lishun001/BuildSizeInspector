@@ -420,6 +420,9 @@ function BuildPage() {
       <ErrorBox error={build.error} retry={() => setRefresh((r) => r + 1)} />
     );
   const b = build.data!;
+  const apkDownload = b.jobs.find((job) => job.apk_download_pending);
+  const apkDownloadFailed =
+    b.analysis_state === "FAILED" && b.upload_state !== "SEALED";
   return (
     <>
       <div className="page-head">
@@ -498,9 +501,15 @@ function BuildPage() {
           type={b.analysis_state === "FAILED" ? "error" : "info"}
           showIcon
           title={
-            b.analysis_state === "FAILED"
-              ? "分析失败，未发布结果"
-              : "构建尚无成功分析结果"
+            apkDownloadFailed
+              ? "APK 下载或校验失败"
+              : b.analysis_state === "FAILED"
+                ? "分析失败，未发布结果"
+                : apkDownload
+                  ? apkDownload.state === "RUNNING"
+                    ? "正在下载并校验 APK"
+                    : "APK 等待后台下载"
+                  : "构建尚无成功分析结果"
           }
           description={
             b.jobs.map((j) => j.error_code || j.state).join(" · ") ||
@@ -620,6 +629,8 @@ function BuildPage() {
                             >
                               下载 {r.role}
                             </a>
+                          ) : r.role === "apk" && apkDownload ? (
+                            "等待服务器下载"
                           ) : (
                             "等待上传"
                           ),

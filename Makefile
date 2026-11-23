@@ -59,8 +59,8 @@ test-postgres-container:
 	uv run --project backend --frozen python tools/test_postgres_container.py
 
 lint:
-	uv run --project backend --frozen ruff check --config backend/pyproject.toml backend tools/test_postgres_container.py tools/validate_unity.py tools/stack_backup.py tools/validate_stack.py tools/benchmark_stack.py
-	uv run --project backend --frozen ruff format --check --config backend/pyproject.toml backend tools/test_postgres_container.py tools/validate_unity.py tools/stack_backup.py tools/validate_stack.py tools/benchmark_stack.py
+	uv run --project backend --frozen ruff check --config backend/pyproject.toml backend integrations/jenkins/unity-report-handoff.py tools/test_postgres_container.py tools/validate_unity.py tools/stack_backup.py tools/validate_stack.py tools/benchmark_stack.py
+	uv run --project backend --frozen ruff format --check --config backend/pyproject.toml backend integrations/jenkins/unity-report-handoff.py tools/test_postgres_container.py tools/validate_unity.py tools/stack_backup.py tools/validate_stack.py tools/benchmark_stack.py
 	pnpm --dir frontend format:check
 
 typecheck:

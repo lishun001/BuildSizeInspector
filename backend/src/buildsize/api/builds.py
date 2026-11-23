@@ -4,11 +4,12 @@ import asyncio
 import uuid
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
+from pydantic import Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -49,6 +50,10 @@ router = APIRouter(
 
 class EmptyBody(Contract):
     pass
+
+
+class ApkDownloadBody(Contract):
+    download_url: Annotated[str, Field(max_length=8192, repr=False)]
 
 
 class ComparisonBody(Contract):
@@ -164,6 +169,7 @@ def job_view(job: Job) -> dict[str, Any]:
         "state": job.state,
         "attempt": job.attempt,
         "error_code": job.error_code,
+        "apk_download_pending": job.apk_download_secret is not None,
     }
 
 
@@ -295,6 +301,27 @@ def finalize(
     build = db.get(Build, build_id)
     assert build is not None
     return {**build_view(db, request.app.state.config, build), "job": job_view(job)}
+
+
+@router.post("/builds/{build_id}/finalize-from-url", status_code=202, response_model=FinalizedBuild)
+def finalize_from_url(
+    build_id: uuid.UUID, body: ApkDownloadBody, actor: Auth, db: DB, request: Request
+) -> dict[str, Any]:
+    mutation(request, actor)
+    config: Config = request.app.state.config
+    job = service.enqueue_apk_download(
+        db,
+        config,
+        storage_for(request),
+        actor,
+        build_id,
+        body.download_url,
+        request.state.request_id,
+    )
+    db.commit()
+    build = db.get(Build, build_id)
+    assert build is not None
+    return {**build_view(db, config, build), "job": job_view(job)}
 
 
 @router.get("/builds/{build_id}", response_model=BuildDetail)

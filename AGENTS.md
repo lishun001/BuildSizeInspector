@@ -6,7 +6,7 @@
 
 `docs/DEVELOPMENT_SPEC.md` → `schemas/` 与 `examples/` → `docs/TASKS.md`。
 
-目标是 Jenkins 上传最终 APK 和 Unity 报告，平台给出准确的版本增量与有证据的解释。蒲公英继续负责现有分发。首版不做 AI、AAB、IPA 和完整 YooAsset 适配。
+目标是 Jenkins 提交本次 Unity 报告、APK 摘要和下载直链，平台从运维批准的 HTTPS 主机下载 APK 并校验，给出准确的版本增量与有证据的解释。蒲公英继续负责现有分发。首版不做 AI、AAB、IPA 和完整 YooAsset 适配。
 
 ## 实施纪律
 

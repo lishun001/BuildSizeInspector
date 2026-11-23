@@ -59,7 +59,11 @@ export type Build = {
     data_error: string | null;
     expired_at: string | null;
   }[];
-  jobs: { state: string; error_code: string | null }[];
+  jobs: {
+    state: string;
+    error_code: string | null;
+    apk_download_pending?: boolean;
+  }[];
   distribution: {
     pgyer?: { publish_state: string; install_page_url: string | null };
   };

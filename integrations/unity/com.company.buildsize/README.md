@@ -38,6 +38,8 @@ BUILDSIZE_IMPORTER_COLLECTION=true
 - unity-settings.json：实际可采的设置，中间文件，不是上传 role；CLI 合并元数据时必须保留 null 和 warnings。
 - capture-complete.json：最后提交的采集回执，含本轮文件清单、长度、SHA-256 和耗时。CI 只能读取回执列出的本次文件，并逐一验哈希；没有完成回执就不读取旧文件兜底。
 
+报告导出后，由 Jenkins Shell 读取采集回执并上报。签名完成的 APK 摘要和对应的下载直链由发布流水线提供，Worker 下载文件并校验后开始分析。[Jenkins 自动下载接入](../../jenkins/README.md)
+
 每个 JSON 临时写完后原子替换，单文件限制 64 MiB，最多 10,000 容器/100,000 记录、50,000 Importer。达到记录上限写 BUILDSIZE_TRUNCATED warning；后端不会将截断报告当作完整资源比较。超出输出大小则采集失败，完成回执不生成。
 
 单个 Importer 失败不影响其余资源。源文件/.meta SHA 是可选项，文件不可读、不存在或超过 64 MiB 时保持 null；dependency_hash 是 Unity 依赖导入哈希，不能当作源文件 SHA。Automatic 纹理格式保持原值，不推断实际平台编码。

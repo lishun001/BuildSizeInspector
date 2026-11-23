@@ -4,12 +4,18 @@ API 前缀为 `/api/v1`，交互式合同见运行服务的 `/docs` 和 `/openap
 
 ## 上传闭环
 
+自动下载使用同一清单和上传接口。Jenkins 上传报告角色后，调用 `POST /builds/{id}/finalize-from-url`，请求体为 `{"download_url":"https://apk.example.com/path/game.apk"}`。同项目 `builds:submit` 权限和完整的 Unity 报告是必要条件，APK 角色仍提供原文件的长度和 SHA-256。返回 202 后，Worker 下载、校验、封存并分析，详情接口可查看状态。相同链接的并发请求复用原任务；任务失败后可提交更新后的链接重试。同一清单已封存时，旧请求返回同一任务。
+
+下载目标由 `APK_DOWNLOAD_HOSTS` 限定。链接通过请求体传输，待下载时加密保存，在封存成功或任务最终失败后清除。响应、日志和既有回执均不包含链接。构建详情中的 `apk_download_pending` 表示当前任务等待后台取得 APK。
+
 1. `POST /projects/{key}/builds`：JSON body 为 submission Schema；`Idempotency-Key` 必须等于该 run_id。新建 201，相同身份与清单重试 200，清单/身份冲突 409。
 2. `PUT /builds/{id}/artifacts/{role}`：流式二进制 body；Content-Type 为 application/octet-stream，Content-Length 和 X-Content-SHA256 与清单一致。成功 201，已验证相同角色 200。失败不登记未验证半文件，客户端整文件重传。
 3. `POST /builds/{id}/finalize`，body 为 `{}`：全部声明产物已验证后封存，并在同一数据库事务写入初始分析任务。成功/重试 202，不等待 Celery 完成。重复 finalize 不创建新修订或新任务。
 4. `GET /builds/{id}`：查询 upload_state、analysis_state、当前/请求中的修订、覆盖与任务。任务列表支持 limit/offset，默认 50、最大 200，并返回 jobs_next_offset。
 
 202 表示已接受，完整 ZIP CRC/解压校验由 Worker 完成。分析失败会保留稳定 error_code；没有旧成功结果时 result 为 null。缺失或部分成功的 Unity/Git 层可能使项目期望覆盖为 PARTIAL，不能把它解释为 ZIP 指标缺失。
+
+分步提交复用上述接口。Jenkins Shell 先初始化包含最终 APK 摘要的完整清单，并上传报告角色。此时 `GET /builds/{id}` 中 APK 为 `pending`，构建仍为 `UPLOADING`。Linux 的 `complete-apk` 校验下载的 APK 后补传 `apk` 角色，再调用 finalize。两个阶段之间传递的 CLI 回执含蒲公英 `buildKey`，无需新增服务端下载接口或改变现有 API 合同。
 
 服务端 report_url 保留 Web 路由约定；M5 页面尚未实现，当前通过上述 API 查询结果。所有 URL 来自 PUBLIC_BASE_URL；CI 来源链接必须在 TRUSTED_LINK_HOSTS 精确允许列表中且不含凭据。
 

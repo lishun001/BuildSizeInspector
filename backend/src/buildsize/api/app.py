@@ -55,6 +55,8 @@ ERROR_STATUS = {
     "ANALYSIS_NOT_AVAILABLE": 409,
     "DISTRIBUTION_CONFLICT": 409,
     "VERSION_CONFLICT": 409,
+    "APK_DOWNLOAD_CONFLICT": 409,
+    "APK_DOWNLOAD_DISABLED": 503,
 }
 
 
@@ -140,7 +142,7 @@ def create_app(config: Config | None = None, engine: Engine | None = None) -> Fa
     @app.get("/api/v1/health/ready")
     def ready(db: DB) -> dict[str, str]:
         version = db.scalar(text("SELECT version_num FROM alembic_version"))
-        if version != "0006_lifecycle":
+        if version != "0007_apk_download":
             raise BuildSizeError("SERVICE_UNAVAILABLE", "数据库迁移未就绪")
         db.execute(select(Project.id).limit(1))
         return {"status": "ready"}

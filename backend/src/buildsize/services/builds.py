@@ -34,6 +34,7 @@ from buildsize.domain.errors import BuildSizeError
 from buildsize.domain.urls import validate_public_url
 from buildsize.domain.validation import read_json, validate_identity
 from buildsize.services.common import aware, fingerprint, now
+from buildsize.storage.apk_download import download_target, protect_url, reveal_url
 from buildsize.storage.local import BlobStorage, StagedUpload
 
 PARSER_SET = "apk-zip-1:unity-1:git-1:rules-1:m5-1"
@@ -191,6 +192,10 @@ def begin_upload(
         raise BuildSizeError("ARTIFACT_DECLARATION_MISMATCH", "上传头与清单不一致")
     if role in artifact_rows(db, build_id):
         return None, build.project_id
+    if role == "apk":
+        job = initial_job(db, build.id)
+        if job is not None and job.state in {"QUEUED", "RUNNING"} and job.apk_download_secret:
+            raise BuildSizeError("APK_DOWNLOAD_CONFLICT", "后台已接管本次 APK 下载")
     if build.upload_state != "UPLOADING" or (
         build.upload_expires_at is not None and aware(build.upload_expires_at) <= now()
     ):
@@ -239,6 +244,14 @@ def finish_upload(
     build = db.get(Build, build_id, with_for_update=True)
     if build is None or build.upload_state != "UPLOADING":
         raise BuildSizeError("UPLOAD_STATE_CONFLICT", "构建不允许继续上传")
+    record_artifact(db, build, role, upload, length, sha256)
+    db.delete(lease)
+
+
+def record_artifact(
+    db: Session, build: Build, role: str, upload: StagedUpload, length: int, sha256: str
+) -> None:
+    """调用方持有对应项目和构建锁。"""
     key = upload.commit()
     blob = db.scalar(
         select(ArtifactBlob).where(
@@ -255,15 +268,17 @@ def finish_upload(
         raise BuildSizeError("BLOB_CORRUPTED", "已登记 Blob 长度冲突")
     blob.gc_marked_at, blob.deleted_at = None, None
     db.add(BuildArtifact(build_id=build.id, role=role, blob_id=blob.id, schema_state="not_checked"))
-    db.delete(lease)
 
 
 def validate_artifacts(
-    db: Session, storage: BlobStorage, build: Build, config: Config
+    db: Session, storage: BlobStorage, build: Build, config: Config, *, require_apk: bool = True
 ) -> tuple[BuildMeta, dict[str, str]]:
     manifest = Submission.model_validate(build.manifest)
     rows = artifact_rows(db, build.id)
-    if set(rows) != {item.role for item in manifest.artifacts}:
+    roles = {item.role for item in manifest.artifacts}
+    if not require_apk:
+        roles.discard("apk")
+    if set(rows) - (set() if require_apk else {"apk"}) != roles:
         raise BuildSizeError("ARTIFACTS_INCOMPLETE", "仍有清单产物未验证上传")
     blobs: dict[str, ArtifactBlob] = {}
     for role, row in rows.items():
@@ -281,10 +296,11 @@ def validate_artifacts(
     except ValidationError as exc:
         raise BuildSizeError("BUILD_META_INVALID", "构建元数据不符合协议") from exc
     validate_identity(manifest, metadata, [])
-    with storage.read_path(blobs["apk"].storage_key) as path:
-        check_apk_container(path, limits=Limits(max_apk_bytes=config.upload_max_bytes))
+    if require_apk:
+        with storage.read_path(blobs["apk"].storage_key) as path:
+            check_apk_container(path, limits=Limits(max_apk_bytes=config.upload_max_bytes))
     coverage = {
-        "apk": "complete",
+        "apk": "complete" if require_apk else "pending",
         "build_meta": "complete",
         "android_metadata": "not_requested",
         "settings": "complete"
@@ -299,7 +315,8 @@ def validate_artifacts(
         )
         else "missing",
     }
-    rows["apk"].schema_state = "not_applicable"
+    if require_apk:
+        rows["apk"].schema_state = "not_applicable"
     rows["build_meta"].schema_state = "complete"
     for role in ("unity_report", "asset_importers", "git_changes", "packages_lock"):
         if role not in rows:
@@ -322,6 +339,12 @@ def validate_artifacts(
             report = REPORTS[role].model_validate(value)
             if isinstance(report, UnityReport | AssetImporters | GitChanges):
                 validate_identity(manifest, metadata, [report])
+            if (
+                not require_apk
+                and isinstance(report, UnityReport)
+                and report.build_result in {"Failed", "Cancelled"}
+            ):
+                raise BuildSizeError("REPORT_DATA_INVALID", "Unity 构建失败或已取消")
             row.schema_state = "complete"
             coverage[role] = (
                 "complete"
@@ -368,6 +391,29 @@ def enqueue_analysis(db: Session, build: Build, request_key: str, coverage: dict
     return job
 
 
+def initial_job(db: Session, build_id: uuid.UUID, *, lock: bool = False) -> Job | None:
+    query = (
+        select(Job)
+        .join(AnalysisRevision, AnalysisRevision.id == Job.analysis_revision_id)
+        .where(
+            Job.build_id == build_id,
+            Job.kind == "analysis",
+            AnalysisRevision.request_key == "initial",
+        )
+    )
+    return db.scalar(query.with_for_update(of=Job) if lock else query)
+
+
+def seal_build(db: Session, build: Build, metadata: BuildMeta) -> None:
+    build.build_metadata = metadata.model_dump(mode="json")
+    build.build_completed_at = aware(
+        datetime.fromisoformat(metadata.build_completed_at.replace("Z", "+00:00"))
+    )
+    build.upload_state = "SEALED"
+    for repository in metadata.repositories:
+        db.add(RepositorySnapshot(build_id=build.id, **repository.model_dump()))
+
+
 def finalize(
     db: Session,
     config: Config,
@@ -380,32 +426,83 @@ def finalize(
         db, actor, build_id, scope="builds:submit", admin=actor.user_id is not None
     )
     db.refresh(build, with_for_update=True)
+    job = initial_job(db, build.id)
     if build.upload_state == "SEALED":
-        revision = db.scalar(
-            select(AnalysisRevision).where(
-                AnalysisRevision.build_id == build.id, AnalysisRevision.request_key == "initial"
-            )
-        )
-        assert revision is not None
-        job = db.scalar(
-            select(Job).where(Job.analysis_revision_id == revision.id, Job.kind == "analysis")
-        )
         assert job is not None
         return job
+    if job is not None:
+        raise BuildSizeError("APK_DOWNLOAD_CONFLICT", "本次构建已提交后台下载")
     if build.upload_state != "UPLOADING" or (
         build.upload_expires_at is not None and aware(build.upload_expires_at) <= now()
     ):
         raise BuildSizeError("UPLOAD_STATE_CONFLICT", "上传已过期")
     metadata, coverage = validate_artifacts(db, storage, build, config)
-    build.build_metadata = metadata.model_dump(mode="json")
-    build.build_completed_at = aware(
-        datetime.fromisoformat(metadata.build_completed_at.replace("Z", "+00:00"))
-    )
-    build.upload_state = "SEALED"
-    for repository in metadata.repositories:
-        db.add(RepositorySnapshot(build_id=build.id, **repository.model_dump()))
+    seal_build(db, build, metadata)
     job = enqueue_analysis(db, build, "initial", coverage)
     audit(db, actor, build.project_id, "build.finalize", build.id, request_id)
+    return job
+
+
+def enqueue_apk_download(
+    db: Session,
+    config: Config,
+    storage: BlobStorage,
+    actor: Principal,
+    build_id: uuid.UUID,
+    url: str,
+    request_id: str | None = None,
+) -> Job:
+    build = authorized_build(
+        db, actor, build_id, scope="builds:submit", admin=actor.user_id is not None
+    )
+    download_target(url, config.apk_download_hosts)
+    # 与 Worker 一样先锁任务，再锁构建。首次入队由构建锁串行化。
+    job = initial_job(db, build_id, lock=True)
+    db.refresh(build, with_for_update=True)
+    locked = job is not None
+    job = job or initial_job(db, build_id)
+    if job is not None:
+        if build.upload_state == "SEALED":
+            return job
+        if job.state in {"QUEUED", "RUNNING"}:
+            if job.apk_download_secret and reveal_url(config, job.apk_download_secret) == url:
+                return job
+            raise BuildSizeError("APK_DOWNLOAD_CONFLICT", "后台下载已在排队或执行")
+        if not locked or job.state != "FAILED":
+            raise BuildSizeError("APK_DOWNLOAD_CONFLICT", "构建任务状态已改变，请重新查询")
+    manifest = Submission.model_validate(build.manifest)
+    apk = next(item for item in manifest.artifacts if item.role == "apk")
+    if not 0 < apk.bytes <= config.upload_max_bytes:
+        raise BuildSizeError("UPLOAD_TOO_LARGE", "APK 长度超出限制")
+    _, coverage = validate_artifacts(db, storage, build, config, require_apk=False)
+    if coverage["unity_report"] != "complete":
+        raise BuildSizeError("REPORT_DATA_INVALID", "后台下载要求本次 Unity 构建报告通过校验")
+    active_upload = db.scalar(
+        select(UploadLease.id).where(
+            UploadLease.build_id == build.id,
+            UploadLease.role == "apk",
+            UploadLease.expires_at > now(),
+        )
+    )
+    if active_upload:
+        raise BuildSizeError("APK_DOWNLOAD_CONFLICT", "本次 APK 已有上传正在进行")
+    build.upload_state = "UPLOADING"
+    build.upload_expires_at = now() + timedelta(hours=24)
+    if job is None:
+        job = enqueue_analysis(db, build, "initial", coverage)
+    else:
+        revision = db.get(AnalysisRevision, job.analysis_revision_id)
+        assert revision is not None
+        outbox = db.scalar(select(Outbox).where(Outbox.job_id == job.id))
+        assert outbox is not None
+        outbox.sent_at = outbox.next_attempt_at = None
+        job.attempt, job.state, job.error_code = 0, "QUEUED", None
+        job.lease_expires_at = None
+        revision.status, revision.error_code = "QUEUED", None
+        revision.summary = {"coverage": coverage, "stage": "queued"}
+        build.analysis_state = "QUEUED"
+    job.apk_download_secret = protect_url(config, url)
+    audit(db, actor, build.project_id, "build.apk_download_queued", build.id, request_id)
     return job
 
 

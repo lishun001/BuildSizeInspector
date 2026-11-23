@@ -34,10 +34,12 @@ pipeline {
         string(name: 'BUILDSIZE_URL', defaultValue: '', description: '平台 HTTPS 地址，不含凭据')
         string(name: 'BUILDSIZE_CREDENTIAL_ID', defaultValue: '', description: '项目 CI token 的 Credentials ID')
         string(name: 'FINAL_APK', defaultValue: 'BuildOutput/game.apk', description: '最终签名/后处理 APK 明确路径')
+        string(name: 'REPORT_SCRIPT', defaultValue: '/opt/BuildSizeInspector/integrations/jenkins/unity-report-handoff.py', description: 'Mac Agent 上报告脚本的绝对路径')
     }
     environment {
         BUILDSIZE_API_URL = "${params.BUILDSIZE_URL}"
         FINAL_APK = "${params.FINAL_APK}"
+        BUILDSIZE_REPORT_SCRIPT = "${params.REPORT_SCRIPT}"
         BUILDSIZE_CI_DIR = ".buildsize/ci/${env.BUILD_NUMBER}/android-release-arm64"
     }
     stages {
@@ -50,7 +52,8 @@ pipeline {
                     advisoryStep {
                         analysisReady = advisory('''#!/bin/sh
 set +x
-buildsize prepare --project demo-game --variant android-release-arm64 --config buildsize-ci.json --output "$BUILDSIZE_CI_DIR/context.json"
+python3 "$BUILDSIZE_REPORT_SCRIPT" prepare --project demo-game --variant android-release-arm64 \
+  --config buildsize-ci.json --directory "$BUILDSIZE_CI_DIR"
 ''')
                         if (analysisReady) {
                             analysisReady = false
@@ -75,45 +78,27 @@ buildsize prepare --project demo-game --variant android-release-arm64 --config b
                 }
             }
         }
-        stage('BuildSize collect/submit（advisory）') {
+        stage('原有蒲公英发布') {
+            // 原发布流程确认成功后，提供本次构建的 apk-download-url.txt。
+            steps { sh './ci/existing-pgyer-publish.sh' }
+        }
+        stage('BuildSize 上报 Unity 报告（advisory）') {
             when { expression { analysisReady } }
             steps {
                 script {
                     advisoryStep {
-                        withCredentials([string(credentialsId: params.BUILDSIZE_CREDENTIAL_ID, variable: 'BUILDSIZE_API_TOKEN')]) {
-                            boolean collected = advisory('''#!/bin/sh
-set +x
-buildsize collect --context "$BUILDSIZE_CI_DIR/context.json" --apk "$FINAL_APK" --completed-at-file "$BUILDSIZE_CI_DIR/completed-at.txt" --output "$BUILDSIZE_CI_DIR/submission"
-''')
-                            if (collected) {
-                                advisory('''#!/bin/sh
-set +x
-buildsize submit --directory "$BUILDSIZE_CI_DIR/submission" --receipt "$BUILDSIZE_CI_DIR/receipt.json"
-''')
-                            }
+                        if (!fileExists("${env.BUILDSIZE_CI_DIR}/apk-download-url.txt")) {
+                            echo 'BuildSize advisory: 缺少本次已发布 APK 的下载链接'
+                            return
                         }
-                    }
-                }
-            }
-        }
-        stage('原有蒲公英发布') {
-            steps { sh './ci/existing-pgyer-publish.sh' } // 不接管 API Key，不忽略原失败。
-            post {
-                always {
-                    script {
-                        if (currentBuild.currentResult != 'ABORTED') {
-                            advisoryStep {
-                                if (fileExists("${env.BUILDSIZE_CI_DIR}/receipt.json") && fileExists("${env.BUILDSIZE_CI_DIR}/pgyer-safe-result.json")) {
-                                    withCredentials([string(credentialsId: params.BUILDSIZE_CREDENTIAL_ID, variable: 'BUILDSIZE_API_TOKEN')]) {
-                                        advisory('''#!/bin/sh
+                        withCredentials([string(credentialsId: params.BUILDSIZE_CREDENTIAL_ID, variable: 'BUILDSIZE_API_TOKEN')]) {
+                            advisory('''#!/bin/sh
 set +x
-buildsize link-pgyer --receipt "$BUILDSIZE_CI_DIR/receipt.json" --result "$BUILDSIZE_CI_DIR/pgyer-safe-result.json"
+python3 "$BUILDSIZE_REPORT_SCRIPT" submit --directory "$BUILDSIZE_CI_DIR" --apk "$FINAL_APK" \
+  --apk-url-file "$BUILDSIZE_CI_DIR/apk-download-url.txt" \
+  --completed-at-file "$BUILDSIZE_CI_DIR/completed-at.txt" \
+  --receipt "$BUILDSIZE_CI_DIR/receipt.json"
 ''')
-                                    }
-                                } else {
-                                    echo 'BuildSize advisory: 缺少本次回执或最终发布结果，不关联最近构建'
-                                }
-                            }
                         }
                     }
                 }
@@ -125,7 +110,7 @@ buildsize link-pgyer --receipt "$BUILDSIZE_CI_DIR/receipt.json" --result "$BUILD
             script {
                 if (currentBuild.currentResult != 'ABORTED') {
                     advisoryStep {
-                        archiveArtifacts artifacts: "${env.BUILDSIZE_CI_DIR}/context.json,${env.BUILDSIZE_CI_DIR}/completed-at.txt,${env.BUILDSIZE_CI_DIR}/receipt.json,${env.BUILDSIZE_CI_DIR}/submission/*.json", allowEmptyArchive: true
+                        archiveArtifacts artifacts: "${env.BUILDSIZE_CI_DIR}/context.json,${env.BUILDSIZE_CI_DIR}/completed-at.txt,${env.BUILDSIZE_CI_DIR}/receipt.json", allowEmptyArchive: true
                     }
                 }
             }
