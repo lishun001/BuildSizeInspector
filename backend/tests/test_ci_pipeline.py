@@ -122,6 +122,49 @@ def token(h):
         return value
 
 
+@pytest.mark.parametrize(
+    ("configured", "multibranch", "expected"),
+    [
+        (None, None, "origin/main"),
+        ("pinned-branch", None, None),
+        (None, "feature/main", "feature/main"),
+    ],
+)
+def test_portable_prepare_captures_freestyle_git_branch(
+    tmp_path, clean_ci, monkeypatch, configured, multibranch, expected
+) -> None:
+    repo = repository(tmp_path / "game")
+    path = configuration(tmp_path / "ci.json", [repo])
+    config = json.loads(path.read_text())
+    config["metadata"]["branch"] = configured
+    path.write_text(json.dumps(config))
+    monkeypatch.setenv("GIT_BRANCH", "origin/main")
+    if multibranch is not None:
+        monkeypatch.setenv("BRANCH_NAME", multibranch)
+    state = tmp_path / "capture"
+    subprocess.run(
+        [
+            sys.executable,
+            ROOT / "integrations/jenkins/unity-report-handoff.py",
+            "prepare",
+            "--directory",
+            state,
+            "--config",
+            path,
+            "--workspace",
+            tmp_path,
+            "--project",
+            "demo-game",
+            "--variant",
+            "variant",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert json.loads((state / "context.json").read_text())["branch"] == expected
+
+
 def test_live_cli_two_git_repositories_and_pgyer(pipeline: Harness, clean_ci) -> None:
     h = pipeline
     repos = [repository(h.tmp_path / name) for name in ("源码 空格", "美术")]

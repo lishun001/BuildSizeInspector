@@ -1,6 +1,6 @@
 # Jenkins / CLI 接入
 
-当前 CLI 与本机 HTTP、PostgreSQL、Git 集成可验证；真实 Jenkins 控制器、节点、脚本审批和蒲公英任务尚未验证。Jenkinsfile.example 是合并参考，不能覆盖现有 Jenkinsfile。它保留两个原脚本入口，接入时替换为原流水线对应步骤，不创建假的游戏构建或发布脚本。
+GemCrew 的自由风格 Jenkins 任务已验证 Unity 报告上报、蒲公英 APK 自动下载、SHA-256 校验和同分支自动比较。[主 README](../../README.md#接入与配置) 提供完整准备清单。使用 Pipeline 时，可将 `Jenkinsfile.example` 中的接入阶段合并到已有流水线，并映射到实际构建和发布入口。
 
 ## 现行流程：Jenkins 上报报告和直链，BuildSize 自动下载 APK
 
@@ -16,8 +16,8 @@ flowchart LR
 
 ### Linux 一次性配置
 
-1. 在部署配置填写 `APK_DOWNLOAD_HOSTS`，逗号分隔，列出原始直链及其跳转所需的精确主机名，如 `apk.example.com,cdn.example.com`。使用运维已核实的文件主机。默认空值时远程下载关闭。Jenkins 的 `BUILD_URL` 主机仍单独加入 `TRUSTED_LINK_HOSTS`。
-2. 在 Linux 更新平台代码，执行 `make stack-build && make stack-up`。Compose 的一次性迁移会自动升级到 `0007_apk_download`，API 与 Worker 需要同时更新。
+1. 在部署配置填写 `APK_DOWNLOAD_HOSTS`，逗号分隔，列出原始直链及其跳转所需的精确主机名。实测蒲公英文件主机有 `cos3.pgyer.com` 和 `pgyer-apps-cfw.appmeme.com`。空值时远程下载关闭。Jenkins 的 `BUILD_URL` 主机单独加入 `TRUSTED_LINK_HOSTS`，填写时省略端口和路径。
+2. 在 Linux 执行 `bash deploy/deploy.sh` 加载部署配置并运行迁移。将 Mac 可访问的 BuildSize HTTPS 入口配置为 `PUBLIC_BASE_URL`。[部署参数](../../deploy/README.md#linux-一键部署)
 3. 为目标项目签发 `builds:read` 和 `builds:submit` 权限令牌。Jenkins 在任务构建环境用 **Secret text** 绑定为 `BUILDSIZE_API_TOKEN`。把平台 HTTPS 地址配置为 `BUILDSIZE_API_URL`。使用内网 CA 时，在上报 Shell 里导出 `SSL_CERT_FILE`，脚本会显式加载该 PEM 文件进行 TLS 校验。凭据在上传脚本中使用，无需传给 Unity 插件。
 
 ```bash
@@ -29,16 +29,18 @@ docker compose --env-file .env.deploy -p buildsize -f deploy/compose.yaml \
 
 Mac Agent 使用 Python 3.8+、Git 和随仓 `unity-report-handoff.py`。将配置模板按实际目录和分支保存为游戏仓库的 `buildsize-ci.json`，模板里的美术仓只是示例。安装 Editor-only Unity 导出包，在原构建入口启用 `BuildOptions.DetailedBuildReport`。自由风格任务把下面的准备代码放在原 Unity 打包 Shell 开头。原 Unity 命令要在**同一步 Shell**中执行。
 
+上报优先读取 Multibranch 的 `BRANCH_NAME`。没有该变量和显式分支配置时，读取 Jenkins Git 插件的 `GIT_BRANCH`，保留 `origin/main` 这类实际值供自动选择基线。[Jenkins Git 插件分支变量](https://plugins.jenkins.io/git/#branch-variables)
+
 ```bash
 set +x
-report_script=/opt/BuildSizeInspector/integrations/jenkins/unity-report-handoff.py
+report_script="$WORKSPACE/ci/buildsize/unity-report-handoff.py"
 ci_dir="$WORKSPACE/.buildsize/ci/$BUILD_NUMBER/android-release-arm64"
 
 if prepared=$(python3 "$report_script" prepare --directory "$ci_dir" \
   --workspace "$WORKSPACE" --project my-game --variant android-release-arm64 \
-  --config "$WORKSPACE/buildsize-ci.json"); then
-  BUILDSIZE_RUN_ID=$(printf '%s' "$prepared" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
-  BUILDSIZE_REPORT_DIR=$(printf '%s' "$prepared" | python3 -c 'import json,sys; print(json.load(sys.stdin)["report_directory"])')
+  --config "$WORKSPACE/buildsize-ci.json") &&
+  BUILDSIZE_RUN_ID=$(printf '%s' "$prepared" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])') &&
+  BUILDSIZE_REPORT_DIR=$(printf '%s' "$prepared" | python3 -c 'import json,sys; print(json.load(sys.stdin)["report_directory"])'); then
   export BUILDSIZE_RUN_ID BUILDSIZE_REPORT_DIR
   export BUILDSIZE_EXPORT_MODE=callback BUILDSIZE_IMPORTER_COLLECTION=true
 else
@@ -48,16 +50,31 @@ else
 fi
 ```
 
-最终签名和后处理成功后，记录完成时间。重试上报时使用原记录。
+将 `--project my-game` 改成在 Linux 创建的项目标识。最终签名和后处理成功后，在原打包 Shell 追加时间记录。如果使用封装构建发布的 `jenkins_builder`，等它成功返回后写入。重试上报时使用原记录。
 
 ```bash
 ci_dir="$WORKSPACE/.buildsize/ci/$BUILD_NUMBER/android-release-arm64"
-if [ -s "$ci_dir/context.json" ] && [ ! -e "$ci_dir/completed-at.txt" ]; then
-  date -u '+%Y-%m-%dT%H:%M:%SZ' > "$ci_dir/completed-at.txt"
+if [ -s "$ci_dir/context.json" ] && [ ! -s "$ci_dir/completed-at.txt" ]; then
+  date -u '+%Y-%m-%dT%H:%M:%SZ' > "$ci_dir/completed-at.txt" ||
+    printf '%s\n' 'BuildSize 完成时间写入失败' >&2
 fi
 ```
 
 ### Mac 发布后：上报本次报告与下载直链
+
+使用 `unity-jenkins-cmds` 的蒲公英任务，可以在发布成功后的独立 Shell 调用 `submit-pgyer.sh`。将脚本和 `unity-report-handoff.py` 放在游戏仓库同一目录。它读取本次 `.jenkins/pgyer_upload.log` 的 `buildKey`，在子进程中读取中台生成的 `.env.sh`，使用已有 `PGY_API_KEY` 获取同一版本的 APK 文件直链，再提交报告和下载请求。APK 父目录下需要有且仅有本次发布的一个 APK。
+
+```bash
+set +x
+# 本步骤使用任务里已配置的 BUILDSIZE_API_URL、BUILDSIZE_API_TOKEN 和 SSL_CERT_FILE。
+bash "$WORKSPACE/ci/buildsize/submit-pgyer.sh" \
+  "$WORKSPACE/.buildsize/ci/$BUILD_NUMBER/android-release-arm64" \
+  "$WORKSPACE/GemCrew/BuildOutput/Android"
+```
+
+根据游戏的实际输出位置替换父目录。签名直链仅存入本次构建目录下权限为 `0600` 的临时文件，上报结束后清理。Linux 下载白名单需包含实测文件主机。桌面 Linux 与 Mac 环境已实测可获取跳转，但蒲公英官方文档仍将安装 API 限定为 iOS 和 Android，桌面调用应由部署方按实际环境验证。[蒲公英安装 API](https://www.pgyer.com/doc/view/api_install)
+
+其他发布器也可以自行向上报脚本提供文件直链。
 
 现有发布步骤提供**本次最终 APK 的 HTTPS 文件直链**。用原发布逻辑取得实际值并作为 `PGYER_APK_DIRECT_URL`。蒲公英网页安装链接、短链接和仅移动端支持的 `/apiv2/app/install` 不能替代文件直链。Linux 要能在链接有效期内直接读取 APK。不要按应用短链猜测最新版。
 
@@ -75,7 +92,7 @@ fi
 
 ```bash
 set +x
-report_script=/opt/BuildSizeInspector/integrations/jenkins/unity-report-handoff.py
+report_script="$WORKSPACE/ci/buildsize/unity-report-handoff.py"
 ci_dir="$WORKSPACE/.buildsize/ci/$BUILD_NUMBER/android-release-arm64"
 final_apk="$WORKSPACE/BuildOutput/game.apk"
 
@@ -130,7 +147,7 @@ collect 查询同配置/分支/可信 CI 来源的候选基线；浅克隆缺失
 
 ## 蒲公英结果
 
-现有发布流程写入 `$BUILDSIZE_CI_DIR/pgyer-safe-result.json`。参考 pgyer-safe-result.example.json；只有五个允许字段：publish_state/build_key/build_version/install_page_url/published_at，缺失值显式 null。publish_state 为 publishing/published/failed/not_published；只有最终发布成功才能写 published，且必须有 build_key、可信安装页和带时区发布时间。传输成功后发布失败应写 failed，不提供安装成功链接或发布时间。
+使用 `link-pgyer` 为构建关联安装页时，由发布流程生成 `$BUILDSIZE_CI_DIR/pgyer-safe-result.json`。参考 `pgyer-safe-result.example.json`，文件只包含 `publish_state`、`build_key`、`build_version`、`install_page_url` 和 `published_at`，缺失值为 `null`。最终发布成功时记录 `published`，并提供版本标识、可信安装页和带时区的发布时间。发布失败记录 `failed`。
 
 CLI 从输入提取白名单；API 拒绝未知字段。URL 禁止 userinfo、token/API key/签名参数，不保存临时带凭据下载地址。不要把蒲公英原始响应重定向到归档目录。普通未成功状态可更新为最终成功；已 published 的同内容请求幂等返回，不同结果返回 409，避免重试覆盖另一个发布版本。
 
@@ -138,4 +155,4 @@ CLI 从输入提取白名单；API 拒绝未知字段。URL 禁止 userinfo、to
 
 ## 外部验收待办
 
-在实际 Jenkins 上验证控制器/插件/Groovy sandbox、两个 variant/构建号的目录隔离、两次真实任务及以下故障：API 断开、错误 token、上传中断重试、凭据绑定失败、原游戏失败、原发布失败、手动中止和 timeout。核对原发布行为不变，日志/归档无凭据。当前本机 CLI/HTTP/数据库测试不能代替这些验收。
+GemCrew 的实际自由风格任务已通过 HTTPS 上报、后台下载和同分支比较验收。其他 Jenkins 项目接入时，仍需检查节点、插件或 Groovy sandbox、不同 variant 和构建号的目录隔离，以及 API 断开、凭据错误、上传中断、原构建或发布失败、手动中止和超时的行为。验收时核对日志和归档中的凭据处理。

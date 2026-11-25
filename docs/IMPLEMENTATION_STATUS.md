@@ -1,6 +1,24 @@
 # 实施状态
 
-更新日期：2026-11-23，Asia/Shanghai。
+更新日期：2026-11-25，Asia/Shanghai。
+
+## 差异页的构建标识
+
+- 页面顶部标明基线和目标的构建号、版本、分支及 CI 来源。分析中也显示比较两端，无基线时保留目标标识。APK 实测大小使用相同的基线和目标标签。
+- `make browser-test` 已复现旧页缺少构建标识，修复后真实浏览器流程通过，覆盖自动比较、手动比较、无基线和移动端布局。`make test-postgres-container` 共 **200 项通过**。`make contracts`、`make lint`、`make typecheck` 和 `make build` 通过。前端改动待部署到内网 Linux。
+
+## 自由风格 Jenkins 的分支与比较基线
+
+- 真实部署的第 36、39 次构建均缺少分支字段，导致 `NO_BASELINE`。上报脚本在没有 `BRANCH_NAME` 或显式配置时读取 Git 插件的 `GIT_BRANCH`。新用例复现旧版将 `origin/main` 丢失，修复后保留实际值。
+- `pytest backend/tests/test_ci_pipeline.py backend/tests/test_jenkins_pgyer.py backend/tests/test_apk_download.py -q --tb=short` 共 **32 项通过**。在真实部署为第 36、39 次创建手动比较，任务完成，APK 净增 `10005` 字节。真实 Jenkins 待推送新版并验证新的同分支构建能自动选到基线。
+
+## 蒲公英直链自动上报
+
+- `submit-pgyer.sh` 从本次中台发布结果取 `buildKey`，由 `pgyer-url` 读取已有发布凭据并获取 APK 跳转。直链以私有临时文件交给 `submit`，Linux Worker 继续按原清单校验长度与 SHA-256。已同步到 `unity-gem-crew` 的 `ci/buildsize/`。
+- `pytest backend/tests/test_jenkins_pgyer.py backend/tests/test_ci_pipeline.py backend/tests/test_apk_download.py -q --tb=short` 共 **26 项通过**。覆盖无效跳转和凭据拒绝、私有文件权限、Shell 证书作用域及临时链接清理，既有报告上报、Worker 下载和补交路径也通过。
+- 本机 Mac 用 `/usr/bin/python3` 运行新命令提取第 36 次发布的真实文件地址，返回 APK 文件头，大小与 Jenkins 一致。Linux 已在同一 APK 的真实后台下载中核对完整 SHA-256。Jenkins 任务替换上报 Shell 后仍需验证一次真实构建。
+- 第 37 次 Jenkins 上报拒绝了蒲公英跳转。使用该次 `buildKey` 从当前 Mac 和实际 Linux 复测均取得 `cos3.pgyer.com` 的 HTTPS APK 地址，响应总长度为 `270723782` 字节。已增加协议、主机、文件路径等明确的校验告警，保护完整地址和签名参数。三组 Jenkins 与下载测试共 **27 项通过**。原 Jenkins 节点返回内容的特征仍待新版日志确认。
+- 第 38 次日志确认蒲公英还会返回 `pgyer-apps-cfw.appmeme.com`。已在脚本和 Linux 下载配置中精确允许该主机。真实 Linux DNS、TLS 和 Worker 白名单校验通过。本次 `buildKey` 从 Linux 复测返回 `cos3.pgyer.com` 的有效 APK 文件头。相关测试共 **29 项通过**，新版 Jenkins 对 AppMeme 文件直链的实际完整下载待确认。
 
 ## Jenkins HTTPS 的 CA 加载
 

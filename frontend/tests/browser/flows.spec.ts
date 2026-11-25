@@ -95,6 +95,26 @@ test("登录、浏览器授权上传、异步分析、比较、证据、复核�
   await expect(
     page.getByRole("heading", { name: "看清这次变化" }),
   ).toBeVisible();
+  const baselineHeader = page
+    .locator(".page-head p")
+    .filter({ hasText: "基线构建" });
+  await expect(
+    baselineHeader.getByRole("link", {
+      name: "构建 #browser-base",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const targetHeader = page
+    .locator(".page-head p")
+    .filter({ hasText: "目标构建" });
+  await expect(
+    targetHeader.getByRole("link", {
+      name: "构建 #browser-target",
+      exact: true,
+    }),
+  ).toHaveAttribute("href", `/builds/${id}`);
+  await expect(targetHeader).toContainText(built.metadata.version_name);
+  await expect(targetHeader).toContainText(built.metadata.branch);
   await expect(
     page
       .getByText("APK 压缩贡献（互斥类别与容器开销）", { exact: true })
@@ -139,9 +159,21 @@ test("登录、浏览器授权上传、异步分析、比较、证据、复核�
   await targetSelect.press("Enter");
   await expect(page).toHaveURL(new RegExp("target=" + id));
   await page.getByRole("button", { name: "创建比较", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "看清这次变化" })).toBeVisible(
-    { timeout: 15000 },
-  );
+  await expect(page.getByText("基线选择理由", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(
+    baselineHeader.getByRole("link", {
+      name: "构建 #browser-base",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    targetHeader.getByRole("link", {
+      name: "构建 #browser-target",
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.goto("/projects/demo-game");
   await expect(
     page.getByRole("heading", { name: "测试项目", exact: true }),
@@ -165,6 +197,14 @@ test("登录、浏览器授权上传、异步分析、比较、证据、复核�
   await page.goto(
     `/comparisons/${built.result.comparison_id}?tab=findings&confidence=hypothesis`,
   );
+  await expect(targetHeader).toContainText("构建 #browser-target");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    )
+    .toBe(true);
   await expect(
     page.getByText("待验证假设", { exact: true }).first(),
   ).toBeVisible();
@@ -189,6 +229,15 @@ test("viewer 只读、跨项目隐藏及无基线/错误空态", async ({ page }
     page.getByText("首版无基线：可以查看当前包，增量保持未知。", {
       exact: true,
     }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".page-head p").filter({ hasText: "基线构建" }),
+  ).toContainText("无基线");
+  await expect(
+    page
+      .locator(".page-head p")
+      .filter({ hasText: "目标构建" })
+      .getByRole("link", { name: "构建 #browser-base", exact: true }),
   ).toBeVisible();
   await page.getByRole("tab", { name: "原因与证据", exact: true }).click();
   await page

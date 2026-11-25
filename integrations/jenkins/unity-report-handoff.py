@@ -12,11 +12,12 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
 
 NAMESPACE = uuid.UUID("c7d4d891-e279-44c6-b16f-8a81abb6ebdc")
 JSON_LIMIT = 64 * 1024**2
 ROLES = {"unity-report.json": "unity_report", "asset-importers.json": "asset_importers"}
+PGYER_BUILD_KEY = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 
 class HandoffError(Exception):
@@ -133,6 +134,9 @@ def prepare(args, directory):
     ]
     run_id = str(uuid.uuid5(NAMESPACE, fingerprint(logical)))
     report_directory = directory / "reports" / run_id
+    branch = os.getenv("BRANCH_NAME") or None
+    if branch is None and cfg["metadata"].get("branch") is None:
+        branch = os.getenv("GIT_BRANCH") or None
     context = {
         "project_key": args.project,
         "variant": args.variant,
@@ -141,7 +145,7 @@ def prepare(args, directory):
         "workspace": str(args.workspace.resolve()),
         "config": cfg,
         "report_directory": str(report_directory),
-        "branch": os.getenv("BRANCH_NAME") or None,
+        "branch": branch,
     }
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = directory / "context.json"
@@ -328,6 +332,92 @@ class UploadApi:
             conn.close()
 
 
+def pgyer_url(publish_log, output):
+    if publish_log.is_symlink() or not publish_log.is_file():
+        raise HandoffError("缺少本次蒲公英发布日志")
+    with publish_log.open("rb") as file:
+        log = file.read(1024**2 + 1)
+    _, marker, payload = log.rpartition(b"Full response JSON:")
+    if len(log) > 1024**2 or not marker:
+        raise HandoffError("蒲公英发布日志缺少本次发布结果")
+    try:
+        result = json.loads(payload)
+        build_key = result["data"]["buildKey"]
+        if result["code"] != 0 or not PGYER_BUILD_KEY.fullmatch(build_key):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise HandoffError("蒲公英发布结果缺少有效 buildKey") from None
+
+    api_key = os.environ.get("PGY_API_KEY") or os.environ.get("PGYER_KEY")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", api_key or ""):
+        raise HandoffError("缺少本次发布的蒲公英 API Key")
+    connection = http.client.HTTPSConnection("www.pgyer.com", timeout=20)
+    try:
+        query = urlencode({"_api_key": api_key, "buildKey": build_key})
+        connection.request(
+            "GET", f"/apiv2/app/install?{query}", headers={"User-Agent": "BuildSizeInspector/0.1"}
+        )
+        with connection.getresponse() as response:
+            url = response.getheader("Location")
+            if response.status not in {301, 302, 303, 307, 308} or not url:
+                try:
+                    code = json.loads(response.read(4096))["code"]
+                except (ValueError, KeyError, TypeError):
+                    code = None
+                status = f"HTTP {response.status}"
+                if type(code) is int and 0 <= code <= 99999:
+                    status += f"，业务码 {code}"
+                raise HandoffError(f"蒲公英未返回 APK 文件跳转（{status}）")
+    except (OSError, http.client.HTTPException):
+        raise HandoffError("蒲公英 HTTPS 请求失败") from None
+    finally:
+        connection.close()
+
+    if (
+        len(url) > 8192
+        or not re.fullmatch(r"[!-~]+", url)
+        or any(character in url for character in ("\\", "#"))
+    ):
+        raise HandoffError("蒲公英返回的跳转地址不是可上报的 HTTPS APK 直链（地址字符或长度无效）")
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname or ""
+    except ValueError:
+        raise HandoffError(
+            "蒲公英返回的跳转地址不是可上报的 HTTPS APK 直链（地址格式无效）"
+        ) from None
+    safe_host = host if re.fullmatch(r"[a-z0-9.-]{1,253}", host) and api_key not in host else "未知"
+    checks = (
+        (parsed.scheme == "https", "缺少 HTTPS 协议"),
+        (
+            host.endswith(".pgyer.com") or host == "pgyer-apps-cfw.appmeme.com",
+            f"主机 {safe_host} 不在已知的蒲公英文件域名中",
+        ),
+        (parsed.netloc.lower() in {host, f"{host}:443"}, "主机含用户信息或端口不受支持"),
+        (parsed.path.lower().endswith(".apk"), "目标路径缺少 APK 后缀"),
+        (
+            api_key not in unquote(url)
+            and not any(
+                name.lower() in {"_api_key", "buildpassword"} for name, _ in parse_qsl(parsed.query)
+            ),
+            "地址含账户凭据",
+        ),
+    )
+    for valid, reason in checks:
+        if not valid:
+            raise HandoffError(f"蒲公英返回的跳转地址不是可上报的 HTTPS APK 直链（{reason}）")
+
+    with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as staged:
+        staged_path = Path(staged.name)
+        try:
+            staged.write(url.encode("ascii") + b"\n")
+            staged.close()
+            staged_path.replace(output)
+        finally:
+            staged_path.unlink(missing_ok=True)
+    return build_key
+
+
 def submit(args, directory):
     context = read_json(directory / "context.json", 1024**2)
     download_url = None
@@ -339,8 +429,8 @@ def submit(args, directory):
         download_url = raw_url.strip()
         if not download_url or len(download_url) > 8192 or len(raw_url) > 8193:
             raise HandoffError("APK 下载链接文件无效")
-    if (args.pgyer_build_key is not None or download_url is None) and not re.fullmatch(
-        r"[A-Za-z0-9_-]{1,128}", args.pgyer_build_key or ""
+    if (args.pgyer_build_key is not None or download_url is None) and not PGYER_BUILD_KEY.fullmatch(
+        args.pgyer_build_key or ""
     ):
         raise HandoffError("请提供本次发布确认后的蒲公英 buildKey")
     unity, captured = capture(context)
@@ -458,6 +548,9 @@ def main():
     before.add_argument("--variant", required=True)
     before.add_argument("--config", type=Path, required=True)
     before.add_argument("--workspace", type=Path, default=Path.cwd())
+    link = commands.add_parser("pgyer-url", help="从本次发布结果取得 APK 文件直链")
+    link.add_argument("--publish-log", type=Path, required=True)
+    link.add_argument("--output", type=Path, required=True)
     after = commands.add_parser("submit")
     after.add_argument("--directory", type=Path, required=True)
     after.add_argument("--apk", type=Path, required=True)
@@ -467,8 +560,11 @@ def main():
     after.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
     try:
-        action = prepare if args.command == "prepare" else submit
-        print(encode(action(args, args.directory.resolve())).decode())
+        if args.command == "pgyer-url":
+            print(pgyer_url(args.publish_log, args.output))
+        else:
+            action = prepare if args.command == "prepare" else submit
+            print(encode(action(args, args.directory.resolve())).decode())
         return 0
     except HandoffError as error:
         print(str(error), file=sys.stderr)

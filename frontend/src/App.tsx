@@ -789,6 +789,34 @@ function BuildPage() {
     </>
   );
 }
+function ComparisonBuildLink({
+  id,
+  build,
+}: {
+  id: string;
+  build: Build | undefined;
+}) {
+  const metadata = build?.build_id === id ? build.metadata : null;
+  return (
+    <>
+      <Link to={`/builds/${id}`}>
+        {metadata
+          ? `构建 #${metadata.ci.build_number}`
+          : `构建 ${id.slice(0, 8)}`}
+      </Link>
+      {metadata && (
+        <span className="muted">
+          {" · "}版本 {metadata.version_name}（{metadata.version_code}）{" · "}
+          {metadata.branch || "分支未知"}
+          {" · "}
+          {metadata.ci.instance_id}/{metadata.ci.job_full_name}
+          {" · "}
+          {metadata.variant}
+        </span>
+      )}
+    </>
+  );
+}
 function ComparisonPage() {
   const { id } = useParams();
   const { params, change, offset } = useFilters();
@@ -796,6 +824,9 @@ function ComparisonPage() {
   const data = useData<Comparison>(`/comparisons/${id}`, tick);
   const tab = params.get("tab") || "growth";
   const q = params.get("q") || "";
+  const baseline = useData<Build>(
+    data.data?.base_build_id ? `/builds/${data.data.base_build_id}` : null,
+  );
   const target = useData<Build>(
     data.data ? `/builds/${data.data.target_build_id}` : null,
   );
@@ -834,33 +865,43 @@ function ComparisonPage() {
   if (data.error) return <ErrorBox error={data.error} />;
   const c = data.data;
   if (!c) return <Loading />;
+  const header = (
+    <div className="page-head">
+      <div className="comparison-heading">
+        <span className="eyebrow">VERSION COMPARISON</span>
+        <h1>看清这次变化</h1>
+        <p>
+          <strong>基线构建</strong>{" "}
+          {c.base_build_id ? (
+            <ComparisonBuildLink id={c.base_build_id} build={baseline.data} />
+          ) : (
+            "无基线"
+          )}
+        </p>
+        <p>
+          <strong>目标构建</strong>{" "}
+          <ComparisonBuildLink id={c.target_build_id} build={target.data} />
+        </p>
+      </div>
+      <Space>
+        <Status value={c.status} />
+        <Button onClick={() => setTick((v) => v + 1)}>刷新</Button>
+      </Space>
+    </div>
+  );
   if (!c.result)
     return (
-      <Card title="比较尚未完成">
-        <Status value={c.status} />
-        <p>{c.error_code || "Worker 正在计算，页面会刷新状态。"}</p>
-        <Button onClick={() => setTick((v) => v + 1)}>刷新</Button>
-      </Card>
+      <>
+        {header}
+        <Card title="比较尚未完成">
+          <p>{c.error_code || "Worker 正在计算，页面会刷新状态。"}</p>
+        </Card>
+      </>
     );
   const result = c.result;
   return (
     <>
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">VERSION COMPARISON</span>
-          <h1>看清这次变化</h1>
-          <p>
-            {c.base_build_id ? (
-              <Link to={`/builds/${c.base_build_id}`}>基线构建</Link>
-            ) : (
-              <span>无基线</span>
-            )}{" "}
-            → <Link to={`/builds/${c.target_build_id}`}>目标构建</Link> ·{" "}
-            <Status value={c.status} />
-          </p>
-        </div>
-        <Button onClick={() => setTick((v) => v + 1)}>刷新</Button>
-      </div>
+      {header}
       {c.status === "NO_BASELINE" && (
         <Alert
           type="info"
@@ -876,10 +917,10 @@ function ComparisonPage() {
         />
       )}
       <div className="stats">
-        <Card title="旧 APK 实测">
+        <Card title="基线 APK 实测">
           <Bytes value={result.old_apk_bytes} />
         </Card>
-        <Card title="新 APK 实测">
+        <Card title="目标 APK 实测">
           <Bytes value={result.new_apk_bytes} />
         </Card>
         <Card title="APK 净增量">
