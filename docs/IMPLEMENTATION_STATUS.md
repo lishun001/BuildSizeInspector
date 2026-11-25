@@ -6,7 +6,8 @@
 
 - 增长来源逐区列出路径范围、基线与目标大小、净变化，增减共用刻度。展开可分页查看实际 APK 路径，包括本次未变化的文件。容器开销单独计量并说明结构，无基线时增量保持未知。
 - `make browser-test` 通过，覆盖区域过滤、路径分页、未变 DEX、空区域、容器开销和移动端布局。APK 差异 API 支持按区域读取，同时保留文件差异页原有默认筛选。
-- `make test-postgres-container` 共 **200 项通过**，验证各类别和容器开销的合计与 APK 净增量一致。`make contracts`、`make lint`、`make typecheck` 和 `make build` 通过。变更当前在本地。
+- `make test-postgres-container` 共 **200 项通过**，验证各类别和容器开销的合计与 APK 净增量一致。`make contracts`、`make lint`、`make typecheck` 和 `make build` 通过。
+- 2026-11-25 在内网 Linux 部署 `6f173e2` 的 API 和 Web 镜像。通过内网 CA 验证 HTTPS 就绪及实际比较页面加载的前端资源，通过容器内 OpenAPI 核对新版路径查询参数。生产库只读核对 GemCrew 构建 #43 → #44 的 APK 差异有 3454 条记录。Worker、Scheduler、PostgreSQL、Redis 的容器 ID 与部署配置校验值均一致，旧 API 与 Web 镜像保留用于回退。
 
 ## 差异页的构建标识
 
