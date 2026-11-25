@@ -195,6 +195,41 @@ header {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.region-path-patterns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.region-delta-track {
+  position: relative;
+  min-width: 96px;
+  height: 5px;
+  margin-top: 5px;
+  border-radius: 3px;
+  background: #e5edf0;
+}
+.region-delta-track::after {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 50%;
+  border-left: 1px solid #91a6ac;
+  content: "";
+}
+.region-delta-track span {
+  position: absolute;
+  height: 100%;
+}
+.region-delta-track .grow {
+  left: 50%;
+  border-radius: 0 3px 3px 0;
+  background: #b25a2e;
+}
+.region-delta-track .shrink {
+  right: 50%;
+  border-radius: 3px 0 0 3px;
+  background: #157d7b;
+}
 .pager {
   display: flex;
   justify-content: flex-end;

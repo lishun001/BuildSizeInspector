@@ -116,9 +116,37 @@ test("登录、浏览器授权上传、异步分析、比较、证据、复核�
   await expect(targetHeader).toContainText(built.metadata.version_name);
   await expect(targetHeader).toContainText(built.metadata.branch);
   await expect(
-    page
-      .getByText("APK 压缩贡献（互斥类别与容器开销）", { exact: true })
-      .first(),
+    page.getByRole("columnheader", { name: "APK 区域", exact: true }),
+  ).toBeVisible();
+  const apkRegion = (label: string) =>
+    page.getByRole("row").filter({
+      has: page.getByRole("rowheader", { name: label, exact: true }),
+    });
+  const bundleRegion = apkRegion("首包 Bundle");
+  await expect(bundleRegion).toContainText("两包均无条目");
+  const overheadRegion = apkRegion("APK 容器开销");
+  await expect(overheadRegion).toContainText("签名块");
+  await expect(overheadRegion).toContainText("无独立 ZIP 路径");
+  const assetsRegion = apkRegion("其他 assets");
+  await assetsRegion.getByRole("button", { name: "查看路径" }).click();
+  await expect(page.getByText(fixture.path, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("lib/arm64-v8a/native.so", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /^下\s*页$/ }).click();
+  await expect(
+    page.getByText("assets/page-29.bin", { exact: true }),
+  ).toBeVisible();
+  await apkRegion("原生库").getByRole("button", { name: "查看路径" }).click();
+  await expect(
+    page.getByText("lib/arm64-v8a/native.so", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("assets/page-29.bin", { exact: true }),
+  ).toHaveCount(0);
+  await apkRegion("DEX").getByRole("button", { name: "查看路径" }).click();
+  await expect(
+    page.getByRole("row", { name: /classes\.dex 未变/ }),
   ).toBeVisible();
   await page.getByRole("tab", { name: "原因与证据", exact: true }).click();
   await expect(
@@ -208,6 +236,18 @@ test("登录、浏览器授权上传、异步分析、比较、证据、复核�
   await expect(
     page.getByText("待验证假设", { exact: true }).first(),
   ).toBeVisible();
+  await page.goto(`/comparisons/${built.result.comparison_id}?tab=growth`);
+  await apkRegion("原生库").getByRole("button", { name: "查看路径" }).click();
+  await expect(
+    page.getByText("lib/arm64-v8a/native.so", { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    )
+    .toBe(true);
 });
 test("viewer 只读、跨项目隐藏及无基线/错误空态", async ({ page }) => {
   await login(page, "viewer");

@@ -587,6 +587,8 @@ def changes(
     | None = None,
     sort: Literal["delta", "absolute_delta", "old_bytes", "new_bytes"] = "delta",
     layer: Literal["apk_entry", "unity_asset", "asset_importer"] = "apk_entry",
+    category: str | None = Query(None, min_length=1, max_length=32),
+    include_unchanged: bool = False,
 ) -> dict[str, Any]:
     row = comparison_access(db, actor, comparison_id)
     if row.status not in {"COMPARED", "NO_BASELINE"}:
@@ -596,9 +598,12 @@ def changes(
 
         return change_page(db, row, layer, limit, offset, q, status, sort)
     query = select(ChangeRecord).where(ChangeRecord.comparison_id == row.id)
-    query = query.where(
-        ChangeRecord.status == status if status else ChangeRecord.status != "UNCHANGED"
-    )
+    if category is not None:
+        query = query.where(ChangeRecord.category == category)
+    if status is not None:
+        query = query.where(ChangeRecord.status == status)
+    elif not include_unchanged:
+        query = query.where(ChangeRecord.status != "UNCHANGED")
     if q:
         query = query.where(ChangeRecord.object_key.contains(q, autoescape=True))
     from sqlalchemy import func

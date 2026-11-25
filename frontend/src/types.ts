@@ -82,7 +82,12 @@ export type Comparison = {
     delta_apk_bytes: number | null;
     growth_percent: number | null;
     delta_overhead_bytes: number | null;
-    categories: { category: string; delta_bytes: number }[];
+    categories: {
+      category: string;
+      old_bytes: number;
+      new_bytes: number;
+      delta_bytes: number;
+    }[];
     quality_gate: string;
     absolute_budget_gate: string;
     finding_count: number;

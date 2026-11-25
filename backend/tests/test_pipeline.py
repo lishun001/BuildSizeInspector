@@ -317,9 +317,11 @@ def test_authorization_pagination_and_persistence(pipeline: Harness) -> None:
 
 def test_comparison_exact_accounting_and_baseline_time(pipeline: Harness) -> None:
     h = pipeline
-    first, first_job = submit(h, *submission("old", {"a": b"123"}, age=120))
+    first, first_job = submit(h, *submission("old", {"a": b"123", "classes.dex": b"dex"}, age=120))
     run(h, first_job)
-    target, target_job = submit(h, *submission("target", {"a": b"12345", "b": b"x"}, age=60))
+    target, target_job = submit(
+        h, *submission("target", {"a": b"12345", "b": b"x", "classes.dex": b"dex"}, age=60)
+    )
     run(h, target_job)
     value = result(h, target)
     comparison_id = value["result"]["comparison_id"]
@@ -327,12 +329,22 @@ def test_comparison_exact_accounting_and_baseline_time(pipeline: Harness) -> Non
     assert comparison["base_build_id"] == first
     summary = comparison["result"]
     assert summary["delta_apk_bytes"] == summary["new_apk_bytes"] - summary["old_apk_bytes"]
-    changes = h.client.get(
-        f"/api/v1/comparisons/{comparison_id}/changes", headers=h.headers
-    ).json()["items"]
+    assert summary["delta_apk_bytes"] == sum(row["delta_bytes"] for row in summary["categories"])
+    changes_url = f"/api/v1/comparisons/{comparison_id}/changes"
+    changes = h.client.get(changes_url, headers=h.headers).json()["items"]
+    assert {row["path"] for row in changes} == {"a", "b"}
     assert (
         summary["delta_apk_bytes"]
         == sum(row["delta_bytes"] for row in changes) + summary["delta_overhead_bytes"]
+    )
+    dex_query = {"category": "dex", "include_unchanged": "true"}
+    dex_rows = h.client.get(changes_url, headers=h.headers, params=dex_query).json()["items"]
+    assert [(row["path"], row["status"]) for row in dex_rows] == [("classes.dex", "UNCHANGED")]
+    assert (
+        h.client.get(
+            changes_url, headers=h.headers, params={**dex_query, "status": "ADDED"}
+        ).json()["items"]
+        == []
     )
     late, late_job = submit(h, *submission("late", {"a": b"1234"}, age=90))
     run(h, late_job)

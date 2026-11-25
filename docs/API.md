@@ -28,7 +28,7 @@ API 前缀为 `/api/v1`，交互式合同见运行服务的 `/docs` 和 `/openap
 | `GET /builds/{id}/artifacts/{role}/download` | 鉴权后流式下载，不返回存储路径 |
 | `POST /comparisons` | body 含 base_build_id、target_build_id；需 UUID Idempotency-Key，返回 202/冻结 comparison_id |
 | `GET /comparisons/{id}` | 双方分析修订、可比性、选择原因和物理指标 |
-| `GET /comparisons/{id}/changes` | 服务端分页，默认排除 UNCHANGED；可按状态、字面路径和增量排序 |
+| `GET /comparisons/{id}/changes` | 服务端分页，默认排除 UNCHANGED。APK 层支持按 `category` 筛选，设置 `include_unchanged=true` 可同时查看未变条目，显式 `status` 优先。支持字面路径搜索和增量排序 |
 | `POST /builds/{id}/reanalyze` | 管理员、空对象 body、新 UUID Idempotency-Key；相同键复用修订 |
 
 列表 limit 默认 50、最大 200，offset 非负。changes 的 sort 仅 delta/absolute_delta/old_bytes/new_bytes。构建详情的 metadata 是有计数的有限预览；完整元数据应下载 build_meta 产物。目录和重复内容不会在详情中一次返回全部路径。

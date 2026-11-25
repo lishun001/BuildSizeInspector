@@ -817,6 +817,248 @@ function ComparisonBuildLink({
     </>
   );
 }
+const apkRegions = [
+  {
+    key: "native_library",
+    label: "原生库",
+    paths: ["lib/<ABI>/"],
+    detail: "目录内的 .so 文件，包括子目录",
+  },
+  {
+    key: "dex",
+    label: "DEX",
+    paths: ["classes.dex", "classes[0-9]+.dex"],
+    detail: "APK 根目录",
+  },
+  {
+    key: "unity_data",
+    label: "Unity Data",
+    paths: ["assets/bin/Data/"],
+    detail: "首包 Bundle 优先匹配的子目录归入 Bundle",
+  },
+  {
+    key: "builtin_bundle",
+    label: "首包 Bundle",
+    paths: ["assets/"],
+    detail: "分类规则指定的精确子目录，路径明细显示实际命中的文件",
+  },
+  {
+    key: "android_resource",
+    label: "Android 资源",
+    paths: ["res/", "resources.arsc"],
+  },
+  {
+    key: "manifest_and_metadata",
+    label: "清单与元数据",
+    paths: ["AndroidManifest.xml", "META-INF/"],
+  },
+  {
+    key: "other_assets",
+    label: "其他 assets",
+    paths: ["assets/"],
+    detail: "除 Unity Data 和首包 Bundle 以外的文件",
+  },
+  {
+    key: "other",
+    label: "其他条目",
+    paths: [],
+    detail: "前述规则未匹配的路径，以及 APK 中显式存储的目录条目",
+  },
+  {
+    key: "apk_overhead",
+    label: "APK 容器开销",
+    paths: [],
+    detail: "ZIP 文件头、中央目录、对齐填充、APK 签名块等结构",
+  },
+];
+
+function RegionPaths({
+  comparisonId,
+  category,
+  label,
+}: {
+  comparisonId: string;
+  category: string;
+  label: string;
+}) {
+  const [offset, setOffset] = useState(0);
+  const data = useData<Page<Change>>(
+    `/comparisons/${comparisonId}/changes?category=${encodeURIComponent(category)}&include_unchanged=true&sort=absolute_delta&limit=25&offset=${offset}`,
+  );
+  if (data.loading) return <Loading />;
+  if (data.error) return <ErrorBox error={data.error} />;
+  return (
+    <section aria-label={`${label}路径明细`}>
+      <Table
+        size="small"
+        rowKey="path"
+        pagination={false}
+        dataSource={data.data?.items}
+        locale={{ emptyText: "该区域暂无路径记录" }}
+        columns={[
+          {
+            title: "APK 内完整路径",
+            dataIndex: "path",
+            render: (path: string) => <code>{path}</code>,
+          },
+          {
+            title: "状态",
+            dataIndex: "status",
+            render: (status: string) =>
+              ({
+                ADDED: "新增",
+                REMOVED: "删除",
+                MODIFIED: "内容变更",
+                PACKAGING_CHANGED: "打包变化",
+                UNCHANGED: "未变",
+              })[status] || status,
+          },
+          ...(
+            [
+              ["old_bytes", "基线压缩"],
+              ["new_bytes", "目标压缩"],
+              ["delta_bytes", "压缩增量"],
+            ] as const
+          ).map(([dataIndex, title]) => ({
+            title,
+            dataIndex,
+            align: "right" as const,
+            render: (value: number | null) => (
+              <Bytes value={value} delta={dataIndex === "delta_bytes"} />
+            ),
+          })),
+        ]}
+      />
+      {(offset > 0 || data.data?.next_offset != null) && (
+        <Pager
+          offset={offset}
+          next={data.data?.next_offset}
+          onChange={setOffset}
+        />
+      )}
+    </section>
+  );
+}
+
+function GrowthSources({
+  comparisonId,
+  categories,
+}: {
+  comparisonId: string;
+  categories: NonNullable<Comparison["result"]>["categories"];
+}) {
+  const [expanded, setExpanded] = useState<string>();
+  const totals = new Map(categories.map((row) => [row.category, row]));
+  const rows = apkRegions.map((region) => ({
+    ...region,
+    totals: totals.get(region.key),
+  }));
+  const maxDelta = Math.max(
+    0,
+    ...categories.map((r) => Math.abs(r.delta_bytes)),
+  );
+  return (
+    <Card title="APK 区域与增长明细">
+      <p className="muted">
+        每个 ZIP 条目只计入一个区域。各区域净变化加上容器开销等于 APK
+        净增量。增减条共用刻度，左减右增。展开可查看完整路径，按变化绝对值从大到小排列。
+      </p>
+      <Table
+        rowKey="key"
+        pagination={false}
+        scroll={{ x: 780 }}
+        dataSource={rows}
+        expandable={{
+          showExpandColumn: false,
+          expandedRowKeys: expanded ? [expanded] : [],
+          rowExpandable: ({ key, totals }) =>
+            key !== "apk_overhead" && !!totals,
+          expandedRowRender: ({ key, label }) =>
+            key === expanded && (
+              <RegionPaths
+                key={key}
+                comparisonId={comparisonId}
+                category={key}
+                label={label}
+              />
+            ),
+        }}
+        columns={[
+          { title: "APK 区域", dataIndex: "label", rowScope: "row" },
+          {
+            title: "路径范围",
+            render: (_, { paths, detail }) => (
+              <>
+                {paths.length > 0 && (
+                  <div className="region-path-patterns">
+                    {paths.map((path) => (
+                      <code key={path}>{path}</code>
+                    ))}
+                  </div>
+                )}
+                {detail && <div className="muted">{detail}</div>}
+              </>
+            ),
+          },
+          {
+            title: "基线大小",
+            align: "right",
+            render: (_, row) => <Bytes value={row.totals?.old_bytes} />,
+          },
+          {
+            title: "目标大小",
+            align: "right",
+            render: (_, row) => <Bytes value={row.totals?.new_bytes} />,
+          },
+          {
+            title: "净变化",
+            align: "right",
+            render: (_, row) => {
+              const delta = row.totals?.delta_bytes;
+              return (
+                <>
+                  <Bytes value={delta} delta />
+                  {delta != null && (
+                    <div className="region-delta-track" aria-hidden="true">
+                      {delta !== 0 && (
+                        <span
+                          className={delta < 0 ? "shrink" : "grow"}
+                          style={{
+                            width: `${(Math.abs(delta) / maxDelta) * 50}%`,
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            },
+          },
+          {
+            title: "实际路径",
+            render: (_, { key, totals }) =>
+              key === "apk_overhead" ? (
+                <span className="muted">无独立 ZIP 路径</span>
+              ) : totals ? (
+                <Button
+                  size="small"
+                  aria-expanded={key === expanded}
+                  onClick={() =>
+                    setExpanded(key === expanded ? undefined : key)
+                  }
+                >
+                  {key === expanded ? "收起路径" : "查看路径"}
+                </Button>
+              ) : (
+                <span className="muted">两包均无条目</span>
+              ),
+          },
+        ]}
+      />
+    </Card>
+  );
+}
+
 function ComparisonPage() {
   const { id } = useParams();
   const { params, change, offset } = useFilters();
@@ -974,17 +1216,11 @@ function ComparisonPage() {
             key: "growth",
             label: "增长来源",
             children: result.categories?.length ? (
-              <>
-                <Chart
-                  label="APK 压缩贡献（互斥类别与容器开销）"
-                  labels={result.categories.map((r) => r.category)}
-                  values={result.categories.map((r) => r.delta_bytes)}
-                />
-                <p className="muted">
-                  类别增量与容器开销合计等于 APK 净增量；findings 与 Unity
-                  packed 不进入此账。
-                </p>
-              </>
+              <GrowthSources
+                key={c.comparison_id}
+                comparisonId={c.comparison_id}
+                categories={result.categories}
+              />
             ) : (
               <Blank text="无可比较的物理增量；无基线不能视为零增长。" />
             ),

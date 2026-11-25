@@ -32,7 +32,9 @@ def test_real_browser_flows(pipeline: Harness):
         executable = str(candidate) if candidate.is_file() else None
     if not executable and not os.getenv("BUILDSIZE_PLAYWRIGHT_INSTALLED"):
         pytest.skip("NOT_VERIFIED：设置浏览器路径或按前端说明安装 Chromium")
-    first, job = submit(h, *submission("browser-base", {"assets/base": b"a"}, age=120))
+    first, job = submit(
+        h, *submission("browser-base", {"assets/base": b"a", "classes.dex": b"dex"}, age=120)
+    )
     run(h, job)
     # other-game 构建 ID 用于跨项目拒绝：直接初始化到另一个项目，不授予 viewer。
     foreign_manifest, _ = submission("browser-foreign")
@@ -49,6 +51,7 @@ def test_real_browser_flows(pipeline: Harness):
         "browser-target",
         {
             path: b"a" * 100,
+            "classes.dex": b"dex",
             "lib/arm64-v8a/native.so": b"native",
             **{f"assets/page-{index:02}.bin": b"x" for index in range(30)},
         },
