@@ -5,7 +5,8 @@
 ## 差异页的构建标识
 
 - 页面顶部标明基线和目标的构建号、版本、分支及 CI 来源。分析中也显示比较两端，无基线时保留目标标识。APK 实测大小使用相同的基线和目标标签。
-- `make browser-test` 已复现旧页缺少构建标识，修复后真实浏览器流程通过，覆盖自动比较、手动比较、无基线和移动端布局。`make test-postgres-container` 共 **200 项通过**。`make contracts`、`make lint`、`make typecheck` 和 `make build` 通过。前端改动待部署到内网 Linux。
+- `make browser-test` 已复现旧页缺少构建标识，修复后真实浏览器流程通过，覆盖自动比较、手动比较、无基线和移动端布局。`make test-postgres-container` 共 **200 项通过**。`make contracts`、`make lint`、`make typecheck` 和 `make build` 通过。
+- 实际 Linux 快进到 `b39913d` 后，通过 `docker compose build web` 和 `up -d --no-deps --no-build --wait web` 更新 Web 容器。验证 HTTPS 就绪接口和实际比较路由加载的新前端包含两端构建标识。API、Worker 容器身份及 `.env.deploy` 文件一致，旧 Web 镜像留存以供回退。
 
 ## 自由风格 Jenkins 的分支与比较基线
 
